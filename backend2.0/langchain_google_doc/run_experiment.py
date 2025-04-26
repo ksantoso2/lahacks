@@ -44,9 +44,9 @@ async def get_google_credentials():
             flow = InstalledAppFlow.from_client_secrets_file(
                 CLIENT_SECRETS_PATH, SCOPES)
             # port=0 means it finds an available port automatically
-            # Let's use a fixed port (e.g., 8000) for easier redirect URI configuration
-            print("Starting local server for authentication on port 8000...")
-            creds = flow.run_local_server(port=8000)
+            # Let's use a fixed port (e.g., 8100) for easier redirect URI configuration
+            print("Starting local server for authentication on port 8100...")
+            creds = flow.run_local_server(port=8100)
         # Save the credentials for the next run
         with open(TOKEN_PATH, 'w') as token_file:
             token_file.write(creds.to_json())

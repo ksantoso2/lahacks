@@ -7,7 +7,7 @@ load_dotenv(dotenv_path=dotenv_path)
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 # You might want to use a specific model optimized for generation
-GEMINI_MODEL_NAME = "gemini-1.5-flash" # Or another suitable model
+GEMINI_MODEL_NAME = "gemini-2.0-flash" # Or another suitable model
 
 if not GEMINI_API_KEY:
     print("Warning: GEMINI_API_KEY not found in .env file.")
