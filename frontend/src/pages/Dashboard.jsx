@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '../utils/supabase';
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -15,57 +14,46 @@ const Dashboard = () => {
   const [studyGuide, setStudyGuide] = useState(null);
   const [quiz, setQuiz] = useState(null);
 
-  // Check for authentication and redirect if not authenticated
+  // Check for authentication via the backend
   useEffect(() => {
-    const getUserSession = async () => {
+    const checkAuthStatus = async () => {
       try {
-        const { data, error } = await supabase.auth.getSession();
+        // Check if we were redirected from a successful login
+        // For now, assume we're logged in if we reached the dashboard page
+        // In a production app, we would check with the backend if the session is valid
         
-        if (error) {
-          throw error;
-        }
+        // Simulate a user for now
+        setUser({
+          email: 'user@example.com',
+          id: '123456'
+        });
+        setLoading(false);
         
-        if (!data.session) {
-          navigate('/');
-          return;
-        }
-        
-        setSession(data.session);
-        setUser(data.session.user);
+        // In the future, you could validate the session with the backend:
+        // const response = await fetch('http://localhost:8000/check-auth', {
+        //   credentials: 'include' // This sends the session cookie
+        // });
+        // const data = await response.json();
+        // if (!data.authenticated) navigate('/');
+        // else setUser(data.user);
       } catch (error) {
-        console.error('Error getting session:', error);
+        console.error('Error checking authentication:', error);
         navigate('/');
       } finally {
         setLoading(false);
       }
     };
     
-    getUserSession();
-    
-    // Set up auth state listener
-    const { data: authListener } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        if (event === 'SIGNED_OUT') {
-          navigate('/');
-        }
-        
-        if (session) {
-          setUser(session.user);
-          setSession(session);
-        }
-      }
-    );
-    
-    return () => {
-      if (authListener && authListener.subscription) {
-        authListener.subscription.unsubscribe();
-      }
-    };
+    checkAuthStatus();
   }, [navigate]);
 
   const handleSignOut = async () => {
     try {
-      await supabase.auth.signOut();
+      // Call the backend to sign out
+      await fetch('http://localhost:8000/logout', {
+        method: 'POST',
+        credentials: 'include' // Send session cookie
+      });
       navigate('/');
     } catch (error) {
       console.error('Error signing out:', error);
@@ -89,23 +77,17 @@ const Dashboard = () => {
     setStudyGuide(null); // Clear previous guide
     
     try {
-      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-      if (sessionError || !sessionData.session) {
-        console.error('Error getting session or no session found:', sessionError);
-        // Optionally navigate to login or show an error message
-        setGeneratingStudyGuide(false);
-        return;
-      }
+      // In our new approach, we're using browser cookies for session management
+      // The backend will use the session cookie to authenticate requests
+      // No need to manually pass a token
 
-      const token = sessionData.session.access_token;
-
-      const response = await fetch('http://localhost:5001/api/generate-study-guide', {
+      const response = await fetch('http://localhost:8000/api/generate-study-guide', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
+          'Content-Type': 'application/json'
         },
-        // body: JSON.stringify({ startTime: studyStartTime, endTime: studyEndTime }) // Optional: send study times
+        credentials: 'include', // Send session cookie for authentication
+        body: JSON.stringify({ startTime: studyStartTime?.toISOString(), endTime: studyEndTime?.toISOString() })
       });
 
       if (!response.ok) {
@@ -129,22 +111,15 @@ const Dashboard = () => {
     setQuiz(null); // Clear previous quiz
     
     try {
-      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-      if (sessionError || !sessionData.session) {
-        console.error('Error getting session or no session found:', sessionError);
-        setGeneratingQuiz(false);
-        return;
-      }
+      // Authentication is handled via browser cookies with the FastAPI backend
 
-      const token = sessionData.session.access_token;
-
-      const response = await fetch('http://localhost:5001/api/generate-quiz', {
+      const response = await fetch('http://localhost:8000/api/generate-quiz', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
+          'Content-Type': 'application/json'
         },
-        // body: JSON.stringify({ studyGuideContent: studyGuide?.content }) // Optional: send context
+        credentials: 'include', // Send session cookie for authentication
+        body: JSON.stringify({ studyGuideContent: studyGuide?.content })
       });
 
       if (!response.ok) {
