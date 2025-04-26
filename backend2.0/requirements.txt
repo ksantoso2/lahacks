@@ -15,6 +15,8 @@ pydantic
 langchain>=0.1.0
 langchain-core>=0.1.0
 langchain-google-genai>=0.1.0
+langchain_google_genai
+
 
 # For local OAuth flow in scripts
 google-auth-oauthlib>=0.5.1 # Or latest
