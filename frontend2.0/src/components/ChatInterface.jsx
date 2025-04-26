@@ -11,6 +11,8 @@ function ChatInterface({ backendUrl, authToken }) {
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false); // State for loading indicator
   const [confirmationPendingMsgId, setConfirmationPendingMsgId] = useState(null); // Track which message needs confirmation
+  const [confirmationType, setConfirmationType] = useState(null); // 'preview_gen' or 'doc_create'
+  const [allowRegenerate, setAllowRegenerate] = useState(false); // Track if regenerate is allowed
   const messagesEndRef = useRef(null); // Ref for scrolling to bottom
 
   // Scroll to bottom when new messages arrive
@@ -22,10 +24,10 @@ function ChatInterface({ backendUrl, authToken }) {
     setInputValue(event.target.value);
   };
 
-  const sendMessage = async (text, confirmation = null) => {
+  const sendMessage = async (text, confirmation = null, regenerate = false) => {
     // Prevent sending empty messages unless it's a confirmation response
     const messageText = text.trim();
-    if (!messageText && confirmation === null) return;
+    if (!messageText && confirmation === null && regenerate === false) return;
 
     // Add user message to state immediately
     // Only add user message if it's not just a confirmation click
@@ -35,12 +37,18 @@ function ChatInterface({ backendUrl, authToken }) {
     setInputValue(''); // Clear input field
     setIsLoading(true); // Show loading indicator
     setConfirmationPendingMsgId(null); // Clear pending confirmation when sending new message or confirmation
+    setConfirmationType(null);
+    setAllowRegenerate(false);
 
     try {
-      // Construct payload, including confirmation if provided
+      // Construct payload, including confirmation or regenerate flag
       const payload = { message: messageText };
       if (confirmation !== null) {
         payload.confirmation = confirmation;
+      }
+      // Add regenerate flag if true
+      if (regenerate === true) {
+        payload.regenerate = true;
       }
 
       const response = await axios.post(`${backendUrl}/api/ask`, payload, {
@@ -53,13 +61,17 @@ function ChatInterface({ backendUrl, authToken }) {
         id: Date.now(), // Assign unique ID
         sender: 'agent', 
         text: response.data.message || "Sorry, I couldn't process that.",
-        needsConfirmation: response.data.needsConfirmation || false // Store confirmation flag
+        needsConfirmation: response.data.needsConfirmation || false, // Store confirmation flag
+        confirmationType: response.data.confirmationType || null, // Store confirmation type
+        allowRegenerate: response.data.allowRegenerate || false // Store regenerate flag
       };
       setMessages((prev) => [...prev, agentMessage]);
 
-      // If this message needs confirmation, store its ID
+      // If this message needs confirmation, store its ID and type
       if (agentMessage.needsConfirmation) {
         setConfirmationPendingMsgId(agentMessage.id);
+        setConfirmationType(agentMessage.confirmationType);
+        setAllowRegenerate(agentMessage.allowRegenerate);
       }
 
     } catch (error) {
@@ -93,24 +105,30 @@ function ChatInterface({ backendUrl, authToken }) {
             ) : (
               msg.text
             )}
-            {/* Check if this message is the one pending confirmation */} 
-            {msg.id === confirmationPendingMsgId ? (
+            {/* Render buttons only if this message ID is the one pending confirmation */} 
+            {msg.id === confirmationPendingMsgId && (
               <div className={stylesModule.confirmationButtons}>
-                <button 
-                  onClick={() => sendMessage('', true)} // Send confirmation=true
-                  className={stylesModule.confirmButtonYes}
-                >
-                  Yes, Create
-                </button>
-                <button 
-                  onClick={() => sendMessage('', false)} // Send confirmation=false
-                  className={stylesModule.confirmButtonNo}
-                >
-                  No, Cancel
-                </button>
+                {/* Buttons for Preview Generation Confirmation */} 
+                {confirmationType === 'preview_gen' && (
+                  <>
+                    <button onClick={() => sendMessage('', true)} className={stylesModule.confirmButtonYes}>Yes, Generate Preview</button>
+                    <button onClick={() => sendMessage('', false)} className={stylesModule.confirmButtonNo}>No, Cancel</button>
+                  </>
+                )}
+                
+                {/* Buttons for Document Creation Confirmation */} 
+                {confirmationType === 'doc_create' && (
+                  <>
+                    <button onClick={() => sendMessage('', true)} className={stylesModule.confirmButtonYes}>Yes, Create</button>
+                    <button onClick={() => sendMessage('', false)} className={stylesModule.confirmButtonNo}>No, Cancel</button>
+                    {/* Show Regenerate button only if allowed */} 
+                    {allowRegenerate && (
+                      <button onClick={() => sendMessage('', null, true)} className={stylesModule.confirmButtonRegen}>Regenerate Preview</button>
+                    )}
+                  </>
+                )}
               </div>
-            ) : null}
-
+            )}
           </div>
         ))}
         <div ref={messagesEndRef} /> {/* Anchor for scrolling */}

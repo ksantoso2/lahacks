@@ -9,83 +9,151 @@ from services.analyze_service import analyze_content
 router = APIRouter()
 
 # --- Pending confirmation storage ---
-pending_requests = {}  # {user_token: file_name}
+# Structure: {user_token: {'state': 'state_name', 'file_name': 'name', 'original_message': 'msg', 'preview': '...'}}
+# States: 'confirm_preview_gen', 'confirm_create'
+pending_requests = {} 
 
 class UserQuery(BaseModel):
-    message: str  # user message can include 'yes' or 'no' response
-    confirmation: bool | None = None  # True/False for confirmation
+    message: str  # user message
+    confirmation: bool | None = None  # True/False for standard confirmation
+    regenerate: bool | None = None # True if user wants to regenerate preview
 
 @router.post("/api/ask")
 async def handle_user_query(query: UserQuery, token_info: tuple[str, dict] = Depends(verify_google_token)):
     user_message = query.message
-    user_token, _ = token_info # This is the Access Token
+    user_token, _ = token_info
+    confirmation_choice = query.confirmation
+    regenerate_request = query.regenerate
 
-    # --- Log pending requests ---
-    print(f"User token: {user_token}")
-    print(f"Pending requests: {pending_requests}")
+    # --- Log state ---
+    print(f"User token: {user_token[:10]}...")
+    pending_data = pending_requests.get(user_token)
+    print(f"Pending data: {pending_data}")
+    print(f"Received query: message='{user_message}', confirmation={confirmation_choice}, regenerate={regenerate_request}")
 
-    # --- Step 1: Check for pending confirmation ---
+    # --- Step 1: Check for and handle pending confirmation --- 
     if user_token in pending_requests:
-        print(f"⚠️ Pending request detected for {user_token}: {pending_requests[user_token]}")
-    
-        file_name = pending_requests[user_token]  # <-- Don't pop here!
+        pending_state = pending_requests[user_token]['state']
+        file_name = pending_requests[user_token]['file_name']
+        original_message = pending_requests[user_token].get('original_message')
 
-        if query.confirmation is None:
-            return {
-                "success": True,
-                "message": (
-                    f"📝 You are about to create a document named **'{file_name}'**.\n"
-                    f"Do you want to proceed? Please use the buttons below."
-                )
-            }
+        print(f"⚠️ Handling pending state: {pending_state} for file: {file_name}")
 
-        # Only pop after processing confirmation
-        file_name = pending_requests.pop(user_token)
+        # --- State: Confirm Preview Generation --- 
+        if pending_state == 'confirm_preview_gen':
+            if confirmation_choice is True:
+                try:
+                    print(f"Generating preview for '{file_name}' based on: {original_message}")
+                    preview = await generate_doc_preview(original_message)
+                    # Update state to confirm creation, store preview
+                    pending_requests[user_token]['state'] = 'confirm_create'
+                    pending_requests[user_token]['preview'] = preview
+                    print(f"Preview generated. New state: confirm_create")
+                    return {
+                        "success": True,
+                        "message": (
+                            f"📝 Okay, here's a preview for **'{file_name}'**:\n\n"
+                            f"> {preview}\n\n"
+                            f"Would you like me to create this document?"
+                        ),
+                        "needsConfirmation": True,
+                        "confirmationType": "doc_create", # Signal frontend type
+                        "allowRegenerate": True      # Signal frontend can show regenerate
+                    }
+                except Exception as e:
+                    print(f"Error generating preview: {e}")
+                    del pending_requests[user_token] # Clear pending on error
+                    raise HTTPException(status_code=500, detail=f"Failed to generate preview: {e}")
+            elif confirmation_choice is False:
+                print("User cancelled preview generation.")
+                del pending_requests[user_token]
+                return {"success": False, "message": "❌ Preview generation canceled."}
+            else:
+                # User sent a message instead of confirming - should not happen with buttons?
+                # For now, just remind them.
+                del pending_requests[user_token] # Clear state and re-parse message
+                print("Confirmation ambiguity. Clearing state and reprocessing message.")
+                # Fall through to re-process the message outside the confirmation block
+        
+        # --- State: Confirm Document Creation (or Regenerate) ---
+        elif pending_state == 'confirm_create':
+            preview = pending_requests[user_token].get('preview', '[Preview not available]')
+            
+            if regenerate_request is True:
+                try:
+                    print(f"Regenerating preview for '{file_name}' based on: {original_message}")
+                    new_preview = await generate_doc_preview(original_message)
+                    pending_requests[user_token]['preview'] = new_preview # Update stored preview
+                    print(f"Preview regenerated.")
+                    return {
+                        "success": True,
+                        "message": (
+                            f"📝 Okay, here's a new preview for **'{file_name}'**:\n\n"
+                            f"> {new_preview}\n\n"
+                            f"Would you like me to create this document now?"
+                        ),
+                        "needsConfirmation": True,
+                        "confirmationType": "doc_create",
+                        "allowRegenerate": True
+                    }
+                except Exception as e:
+                    print(f"Error regenerating preview: {e}")
+                    # Don't delete pending state here, let user try again or cancel
+                    raise HTTPException(status_code=500, detail=f"Failed to regenerate preview: {e}")
+            
+            elif confirmation_choice is True:
+                try:
+                    print(f"User confirmed creation for '{file_name}'. Creating document...")
+                    file_id, file_url = await create_google_doc(file_name, user_token)
+                    del pending_requests[user_token] # Clear state on success
+                    return {
+                        "success": True,
+                        "message": f"✅ Document '{file_name}' created! Here's the link: {file_url}",
+                        "docUrl": file_url
+                    }
+                except Exception as e:
+                    print(f"Error creating doc after confirmation: {e}")
+                    del pending_requests[user_token] # Clear pending on error
+                    raise HTTPException(status_code=500, detail=f"Failed to create document: {e}")
+            
+            elif confirmation_choice is False:
+                print("User cancelled document creation.")
+                del pending_requests[user_token]
+                return {"success": False, "message": "❌ Document creation canceled."}
+            
+            else:
+                # User sent a message instead of confirming
+                del pending_requests[user_token] # Clear state and re-parse message
+                print("Confirmation ambiguity. Clearing state and reprocessing message.")
+                # Fall through to re-process the message outside the confirmation block
 
-        if query.confirmation is True:
-            file_id, file_url = await create_google_doc(file_name, user_token)
-            return {
-                "success": True,
-                "message": f"✅ Document '{file_name}' created! Here's the link: {file_url}",
-                "docUrl": file_url
-            }
-        elif query.confirmation is False:
-            return {
-                "success": False,
-                "message": "❌ Action canceled. No document was created."
-            }
-
-
-    # --- Step 2: No pending request - Parse user message with Gemini ---
+    # --- Step 2: No pending request - Parse user message with Gemini --- 
+    # (This part runs only if no pending request was handled above)
+    print("No pending request found or handled, parsing new message.")
     parsed = await parse_user_message(user_message)
-    
     action = parsed.get("action_to_perform")
     
-    # --- Handle Create Document Action ---
+    # --- Handle Create Document Action (Initial request) ---
     if action == "createDoc":
         file_name = parsed.get("name", "Untitled Document")
         try:
-            # 1. Generate the preview based on the original message
-            preview = await generate_doc_preview(user_message)
+            # Store initial state: confirm preview generation
+            pending_requests[user_token] = {
+                'state': 'confirm_preview_gen',
+                'file_name': file_name,
+                'original_message': user_message # Store original msg for preview gen
+            }
+            print(f"📝 Storing initial pending request for {user_token}: state=confirm_preview_gen, file={file_name}")
 
-            # 2. Store the file name for confirmation
-            pending_requests[user_token] = file_name
-            print(f"📝 Storing pending request for {user_token}: {file_name}")
-
-            # 3. Return the preview and ask for confirmation
-            #    Do NOT create the document yet.
+            # Ask user to confirm PREVIEW generation
             return {
-            "success": True,
-            "message": (
-                f"📝 I’ve drafted a preview for **'{file_name}'** based on your request:\n\n"
-                f"> {preview}\n\n"
-                f"Would you like me to create this document? Please use the buttons below."
-            ),
-            "needsConfirmation": True # Indicate frontend needs confirmation
+                "success": True,
+                "message": f"I can create a document named **'{file_name}'**. Would you like me to generate a preview first?",
+                "needsConfirmation": True,
+                "confirmationType": "preview_gen" # Signal frontend type
             }
         except Exception as e:
-             print(f"Error during preview generation or storing pending request: {e}")
-             # Clean up pending request if it was stored before error
+             print(f"Error initiating createDoc flow: {e}")
              if user_token in pending_requests:
                  del pending_requests[user_token]
              raise HTTPException(status_code=500, detail=f"Failed to process document creation request: {e}")
@@ -106,44 +174,36 @@ async def handle_user_query(query: UserQuery, token_info: tuple[str, dict] = Dep
                 context = await get_drive_item_content(target_name, user_token)
                 if not context:
                      print(f"Warning: No content found or retrieved for target '{target_name}'. Proceeding without context.")
-                     # Optionally inform the user item not found?
-                     # return {"success": False, "message": f"Could not find or access '{target_name}'."}
                 else:
                      print(f"Successfully fetched context for '{target_name}'.")
             except Exception as e:
                 print(f"Error fetching context for '{target_name}': {e}")
-                # Decide if we proceed without context or return error
-                # For now, let's proceed without context but log the error
-                # raise HTTPException(status_code=500, detail=f"Failed to fetch content for '{target_name}': {e}")
         
         # Call the analysis service with the query and potentially context
         analysis_result = await analyze_content(analysis_query, context)
         
         if analysis_result.get("error"):
-             # Pass Gemini error back to client
              raise HTTPException(status_code=500, detail=analysis_result["error"])
         else:
             return {
                 "success": True,
                 "message": analysis_result.get("analysis", "Analysis complete."),
-                "type": "analysis_result" # Add type for frontend
+                "type": "analysis_result"
             }
             
-    # --- Handle Unrecognized Action --- 
+    # --- Handle Unrecognized Action or Fallback --- 
     elif parsed.get("error"):
-        # If the parser itself returned an error
         raise HTTPException(status_code=400, detail=parsed.get("error"))
     else:
-        # If parser succeeded but action wasn't recognized
-        # Maybe Gemini hallucinated an action? Or prompt needs refinement?
-        print(f"Unrecognized action parsed: {action}")
-        # Return a generic response or try a general Gemini query?
-        # For now, return a simple message.
-        # Alternative: Call analyze_content with just the original user_message? 
-        # analysis_result = await analyze_content(user_message, None)
-        # ... return analysis_result ...
-        return {
-            "success": False,
-            "message": "Sorry, I can only create documents or analyze content right now.",
-            "type": "fallback_message"
-        }
+        print(f"Unrecognized action parsed: {action}. Falling back to general response.")
+        # Fallback: Use Gemini for a general response instead of specific action
+        try:
+            fallback_response = await generate_gemini_response(user_message)
+            return {
+                "success": True, 
+                "message": fallback_response,
+                "type": "fallback_message"
+            }
+        except Exception as e:
+            print(f"Error generating fallback response: {e}")
+            raise HTTPException(status_code=500, detail="Sorry, I encountered an error trying to respond.")
