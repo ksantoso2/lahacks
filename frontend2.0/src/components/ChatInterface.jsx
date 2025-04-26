@@ -1,15 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios'; // Import axios for API calls
+import ReactMarkdown from 'react-markdown'; // Import ReactMarkdown
 import stylesModule from './ChatInterface.module.css'; // Import CSS Module
 
 // Accept props, specifically backendUrl and authToken
 function ChatInterface({ backendUrl, authToken }) {
   const [messages, setMessages] = useState([
-    { sender: 'agent', text: 'Hello! How can I help you with your Google Drive files today?' },
+    { id: Date.now(), sender: 'agent', text: 'Hello! How can I help you with your Google Drive files today?' },
   ]);
   const [inputValue, setInputValue] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const messagesEndRef = useRef(null);
+  const [isLoading, setIsLoading] = useState(false); // State for loading indicator
+  const [confirmationPendingMsgId, setConfirmationPendingMsgId] = useState(null); // Track which message needs confirmation
+  const messagesEndRef = useRef(null); // Ref for scrolling to bottom
 
   // Scroll to bottom when new messages arrive
   useEffect(() => {
@@ -20,70 +22,59 @@ function ChatInterface({ backendUrl, authToken }) {
     setInputValue(event.target.value);
   };
 
-  const handleSendMessage = async () => {
-    const userMessage = inputValue.trim();
-    if (!userMessage || isLoading) return;
-  
-    setMessages((prevMessages) => [
-      ...prevMessages,
-      { sender: 'user', text: userMessage },
-    ]);
-    setInputValue('');
-    setIsLoading(true);
-  
-    try {
-      const chatApiUrl = `${backendUrl}/api/ask`;
-  
-      // Add confirmation logic here
-      const lowerMessage = userMessage.toLowerCase();
-      const confirmationYes = ['yes', 'y', 'sure', 'ok', 'okay'];
-      const confirmationNo = ['no', 'n', 'cancel'];
-  
-      const confirmation = confirmationYes.includes(lowerMessage)
-        ? true
-        : confirmationNo.includes(lowerMessage)
-        ? false
-        : null;
-  
-      console.log('Sending to backend:', { message: userMessage, confirmation });
-      
-      const response = await axios.post(
-        chatApiUrl,
-        {
-          message: userMessage,    // Always send message
-          confirmation: confirmation,  // Send confirmation if detected
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${authToken}`,
-          },
-        }
-      );
+  const sendMessage = async (text, confirmation = null) => {
+    // Prevent sending empty messages unless it's a confirmation response
+    const messageText = text.trim();
+    if (!messageText && confirmation === null) return;
 
-      if (response.data && response.data.message) {
-        setMessages((prevMessages) => [
-          ...prevMessages,
-          { sender: 'agent', text: response.data.message },
-        ]);
+    // Add user message to state immediately
+    // Only add user message if it's not just a confirmation click
+    if (messageText) {
+      setMessages((prev) => [...prev, { id: Date.now(), sender: 'user', text: messageText }]);
+    }
+    setInputValue(''); // Clear input field
+    setIsLoading(true); // Show loading indicator
+    setConfirmationPendingMsgId(null); // Clear pending confirmation when sending new message or confirmation
+
+    try {
+      // Construct payload, including confirmation if provided
+      const payload = { message: messageText };
+      if (confirmation !== null) {
+        payload.confirmation = confirmation;
       }
+
+      const response = await axios.post(`${backendUrl}/api/ask`, payload, {
+        headers: {
+          Authorization: `Bearer ${authToken}`, // Include auth token
+        },
+      });
+
+      const agentMessage = { 
+        id: Date.now(), // Assign unique ID
+        sender: 'agent', 
+        text: response.data.message || "Sorry, I couldn't process that.",
+        needsConfirmation: response.data.needsConfirmation || false // Store confirmation flag
+      };
+      setMessages((prev) => [...prev, agentMessage]);
+
+      // If this message needs confirmation, store its ID
+      if (agentMessage.needsConfirmation) {
+        setConfirmationPendingMsgId(agentMessage.id);
+      }
+
     } catch (error) {
       console.error('Error sending message:', error);
-      setMessages((prevMessages) => [
-        ...prevMessages,
-        {
-          sender: 'agent',
-          text: `Sorry, I encountered an error. ${error.response?.data?.detail || error.message}`,
-        },
-      ]);
+      const errorText = error.response?.data?.detail || 'An error occurred while connecting to the backend.';
+      setMessages((prev) => [...prev, { id: Date.now(), sender: 'agent', text: `Error: ${errorText}` }]);
     } finally {
       setIsLoading(false);
     }
-  };      
+  };
 
   const handleKeyDown = (event) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault(); // Prevent newline on Enter
-      handleSendMessage();
+      sendMessage(inputValue);
     }
   };
 
@@ -96,7 +87,30 @@ function ChatInterface({ backendUrl, authToken }) {
             // Combine base message class with specific user/agent class
             className={`${stylesModule.message} ${msg.sender === 'user' ? stylesModule.userMessage : stylesModule.agentMessage}`}
           >
-            {msg.text}
+            {/* Render agent messages as Markdown, user messages as plain text */}
+            {msg.sender === 'agent' ? (
+              <ReactMarkdown>{msg.text}</ReactMarkdown>
+            ) : (
+              msg.text
+            )}
+            {/* Check if this message is the one pending confirmation */} 
+            {msg.id === confirmationPendingMsgId ? (
+              <div className={stylesModule.confirmationButtons}>
+                <button 
+                  onClick={() => sendMessage('', true)} // Send confirmation=true
+                  className={stylesModule.confirmButtonYes}
+                >
+                  Yes, Create
+                </button>
+                <button 
+                  onClick={() => sendMessage('', false)} // Send confirmation=false
+                  className={stylesModule.confirmButtonNo}
+                >
+                  No, Cancel
+                </button>
+              </div>
+            ) : null}
+
           </div>
         ))}
         <div ref={messagesEndRef} /> {/* Anchor for scrolling */}
@@ -114,7 +128,7 @@ function ChatInterface({ backendUrl, authToken }) {
         <button
           // Combine base class with disabled class conditionally
           className={`${stylesModule.sendButton} ${isLoading ? stylesModule.sendButtonDisabled : ''}`}
-          onClick={handleSendMessage}
+          onClick={() => sendMessage(inputValue)}
           disabled={isLoading}
         >
           {isLoading ? '...' : 'Send'}
