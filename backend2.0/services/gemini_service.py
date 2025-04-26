@@ -59,6 +59,35 @@ async def parse_user_message(user_message: str) -> dict:
         print(f"Error decoding Gemini JSON response: {e}\nRaw response was: {response.text}")
         return {"error": "Failed to parse Gemini response", "details": response.text}
     except Exception as e:
+        print(f"Gemini parsing error: {e}")
+        return {"error": "Failed to parse"}
+
+async def generate_doc_preview(file_name: str) -> str:
+    try:
+        prompt = f"Create a short preview for a Google Doc titled '{file_name}'."
+
+        model = genai.GenerativeModel(
+            GEMINI_MODEL_NAME,
+            system_instruction="You are a content creator that generates document previews."
+        )
+        response = await model.generate_content_async(prompt)
+        return response.text.strip()
+    except Exception as e:
+        print(f"Gemini preview error: {e}")
+        return "Failed to generate preview."
+    
+async def generate_gemini_response(prompt: str) -> str:
+    try:
+        # Custom prompt specific to this function
+        model = genai.GenerativeModel(
+            GEMINI_MODEL_NAME,
+            system_instruction="You are a response generator for any queries."
+        )
+        response = await model.generate_content_async(prompt)
+        return response.text
+    except Exception as e:
+        return "⚠️ Gemini failed to generate a response."
+
         print(f"Error during Gemini parsing call: {e}")
         return {"error": f"Failed to parse user message: {e}"}
 

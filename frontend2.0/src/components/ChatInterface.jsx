@@ -23,51 +23,62 @@ function ChatInterface({ backendUrl, authToken }) {
   const handleSendMessage = async () => {
     const userMessage = inputValue.trim();
     if (!userMessage || isLoading) return;
-
-    // Add user message to chat
+  
     setMessages((prevMessages) => [
       ...prevMessages,
       { sender: 'user', text: userMessage },
     ]);
     setInputValue('');
     setIsLoading(true);
-
+  
     try {
-      // --- API Call to Backend ---
-      // Use the backendUrl prop passed from App.jsx
       const chatApiUrl = `${backendUrl}/api/ask`;
+  
+      // Add confirmation logic here
+      const lowerMessage = userMessage.toLowerCase();
+      const confirmationYes = ['yes', 'y', 'sure', 'ok', 'okay'];
+      const confirmationNo = ['no', 'n', 'cancel'];
+  
+      const confirmation = confirmationYes.includes(lowerMessage)
+        ? true
+        : confirmationNo.includes(lowerMessage)
+        ? false
+        : null;
+  
+      console.log('Sending to backend:', { message: userMessage, confirmation });
       
-      // Make sure to send the token in the Authorization header
-      const response = await axios.post(chatApiUrl, { 
-        message: userMessage,
-      }, { 
-        headers: {
-          'Authorization': `Bearer ${authToken}` // Send the token
+      const response = await axios.post(
+        chatApiUrl,
+        {
+          message: userMessage,    // Always send message
+          confirmation: confirmation,  // Send confirmation if detected
         },
-      }); 
+        {
+          headers: {
+            Authorization: `Bearer ${authToken}`,
+          },
+        }
+      );
 
-      // Add agent response to chat
-      if (response.data && response.data.response) {
+      if (response.data && response.data.message) {
         setMessages((prevMessages) => [
           ...prevMessages,
-          { sender: 'agent', text: response.data.response },
+          { sender: 'agent', text: response.data.message },
         ]);
       }
     } catch (error) {
       console.error('Error sending message:', error);
-      // Add error message to chat
       setMessages((prevMessages) => [
         ...prevMessages,
         {
           sender: 'agent',
-          // Improved error display - check for specific backend errors if possible
-          text: `Sorry, I encountered an error. ${error.response?.data?.detail || error.response?.data?.error || error.message}`,
+          text: `Sorry, I encountered an error. ${error.response?.data?.detail || error.message}`,
         },
       ]);
     } finally {
       setIsLoading(false);
     }
-  };
+  };      
 
   const handleKeyDown = (event) => {
     if (event.key === 'Enter' && !event.shiftKey) {
