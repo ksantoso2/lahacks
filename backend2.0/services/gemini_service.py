@@ -7,7 +7,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
-GEMINI_MODEL_NAME = "models/gemini-1.5-pro-latest"  # use latest if 2.5 is mapped like this
+GEMINI_MODEL_NAME = "models/gemini-2.0-flash"  # use latest if 2.5 is mapped like this
 SYSTEM_PROMPT = """You are an instruction parser for a Google Drive Assistant. Only return a JSON like:
 
 {"action_to_perform": "createDoc", "name": "My Plan"}
