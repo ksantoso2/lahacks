@@ -29,10 +29,12 @@
   margin-bottom: 10px; /* Increased spacing between bubbles */
   padding: 8px 12px; /* Adjusted padding */
   border-radius: 18px; /* More rounded corners */
-  max-width: 85%; /* Slightly wider max width */
+  max-width: 75%; /* Slightly wider max width */
   color: #333;
   line-height: 1.4;
   word-wrap: break-word; /* Ensure long words break */
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  text-align: left; /* Align text to the left */
 }
 
 /* User message specific styles */
@@ -96,4 +98,38 @@
   background-color: #007bff;
   opacity: 0.5; /* Slightly more faded when disabled */
   cursor: not-allowed;
+}
+
+/* Confirmation Buttons Styling */
+.confirmationButtons {
+  display: flex;
+  gap: 10px; /* Space between buttons */
+  margin-top: 10px; /* Space above buttons */
+}
+
+.confirmButtonYes,
+.confirmButtonNo {
+  padding: 6px 12px;
+  border-radius: 5px;
+  border: none;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.confirmButtonYes {
+  background-color: #28a745; /* Green */
+  color: white;
+}
+
+.confirmButtonNo {
+  background-color: #dc3545; /* Red */
+  color: white;
+}
+
+.confirmButtonYes:hover {
+  background-color: #218838;
+}
+
+.confirmButtonNo:hover {
+  background-color: #c82333;
 }

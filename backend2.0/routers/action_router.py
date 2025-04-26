@@ -35,7 +35,7 @@ async def handle_user_query(query: UserQuery, token_info: tuple[str, dict] = Dep
                 "success": True,
                 "message": (
                     f"📝 You are about to create a document named **'{file_name}'**.\n"
-                    f"Do you want to proceed? Reply **yes** or **no**."
+                    f"Do you want to proceed? Please use the buttons below."
                 )
             }
 
@@ -65,19 +65,30 @@ async def handle_user_query(query: UserQuery, token_info: tuple[str, dict] = Dep
     if action == "createDoc":
         file_name = parsed.get("name", "Untitled Document")
         try:
-            file_id, file_url = await create_google_doc(file_name, user_token)
+            # 1. Generate the preview based on the original message
+            preview = await generate_doc_preview(user_message)
+
+            # 2. Store the file name for confirmation
+            pending_requests[user_token] = file_name
+            print(f"📝 Storing pending request for {user_token}: {file_name}")
+
+            # 3. Return the preview and ask for confirmation
+            #    Do NOT create the document yet.
             return {
             "success": True,
             "message": (
-                f"📝 I’ve drafted a preview for **'{file_name}'**:\n\n"
-                f"{preview}\n\n"
-                f"Would you like me to create this document? Reply **yes** or **no**."
-            )
+                f"📝 I’ve drafted a preview for **'{file_name}'** based on your request:\n\n"
+                f"> {preview}\n\n"
+                f"Would you like me to create this document? Please use the buttons below."
+            ),
+            "needsConfirmation": True # Indicate frontend needs confirmation
             }
         except Exception as e:
-             print(f"Error creating doc: {e}")
-             # Raise HTTPException to send error back to client
-             raise HTTPException(status_code=500, detail=f"Failed to create document: {e}")
+             print(f"Error during preview generation or storing pending request: {e}")
+             # Clean up pending request if it was stored before error
+             if user_token in pending_requests:
+                 del pending_requests[user_token]
+             raise HTTPException(status_code=500, detail=f"Failed to process document creation request: {e}")
 
     # --- Handle Analyze Action ---
     elif action == "analyze":
@@ -136,4 +147,3 @@ async def handle_user_query(query: UserQuery, token_info: tuple[str, dict] = Dep
             "message": "Sorry, I can only create documents or analyze content right now.",
             "type": "fallback_message"
         }
-
