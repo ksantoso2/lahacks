@@ -2,52 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios'; // Import axios for API calls
 import stylesModule from './ChatInterface.module.css'; // Import CSS Module
 
-// Basic styling - can be expanded or moved to CSS file
-const styles = {
-  chatContainer: {
-    display: 'flex',
-    flexDirection: 'column',
-    height: '100vh', // Use viewport height to fill sidebar
-    boxSizing: 'border-box',
-    padding: '10px',
-    // Use a modern system font stack for better appearance
-    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol"',
-    fontSize: '14px',
-  },
-  messagesContainer: {
-    flexGrow: 1,
-    overflowY: 'auto',
-    marginBottom: '10px',
-    border: '1px solid #ccc',
-    borderRadius: '4px',
-    padding: '8px',
-    backgroundColor: '#f9f9f9',
-  },
-  message: {
-    marginBottom: '8px',
-    padding: '6px 10px',
-    borderRadius: '15px',
-    maxWidth: '80%',
-    color: '#333', // Add default dark text color
-    textAlign: 'left', // Ensure text inside bubble is left-aligned
-  },
-  userMessage: {
-    backgroundColor: '#d1eaff',
-    alignSelf: 'flex-end',
-    marginLeft: 'auto',
-    // Removed textAlign: 'right' - bubbles align right, text inside aligns left
-  },
-  agentMessage: {
-    backgroundColor: '#e0e0e0',
-    alignSelf: 'flex-start',
-    marginRight: 'auto',
-  },
-  inputContainer: {
-    display: 'flex',
-    alignItems: 'center', // Align items vertically in the center
-  },
-};
-
 // Accept props, specifically backendUrl and authToken
 function ChatInterface({ backendUrl, authToken }) {
   const [messages, setMessages] = useState([
@@ -134,22 +88,20 @@ function ChatInterface({ backendUrl, authToken }) {
   };
 
   return (
-    <div style={styles.chatContainer}>
-      <div style={styles.messagesContainer}>
+    <div className={stylesModule.chatContainer}>
+      <div className={stylesModule.messagesContainer}>
         {messages.map((msg, index) => (
           <div
             key={index}
-            style={{
-              ...styles.message,
-              ...(msg.sender === 'user' ? styles.userMessage : styles.agentMessage),
-            }}
+            // Combine base message class with specific user/agent class
+            className={`${stylesModule.message} ${msg.sender === 'user' ? stylesModule.userMessage : stylesModule.agentMessage}`}
           >
             {msg.text}
           </div>
         ))}
         <div ref={messagesEndRef} /> {/* Anchor for scrolling */}
       </div>
-      <div style={styles.inputContainer}>
+      <div className={stylesModule.inputContainer}>
         <input
           type="text"
           className={stylesModule.inputField} // Use CSS Module class

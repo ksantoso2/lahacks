@@ -1,13 +1,72 @@
+/* Overall container */
+.chatContainer {
+  display: flex;
+  flex-direction: column;
+  height: 100%; /* Use percentage for flexibility when embedded */
+  box-sizing: border-box;
+  padding: 8px; /* Slightly reduced padding */
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+  font-size: 14px;
+  background-color: #ffffff; /* Explicit background */
+}
+
+/* Area holding the messages */
+.messagesContainer {
+  flex-grow: 1;
+  overflow-y: auto;
+  margin-bottom: 10px;
+  /* Removed border for a cleaner look, maybe add back if needed */
+  /* border: 1px solid #ccc; */
+  border-radius: 4px;
+  padding: 8px;
+  background-color: #f7f7f7; /* Slightly different background for messages area */
+  display: flex; /* Use flexbox to manage messages */
+  flex-direction: column; /* Stack messages vertically */
+}
+
+/* Base style for all message bubbles */
+.message {
+  margin-bottom: 10px; /* Increased spacing between bubbles */
+  padding: 8px 12px; /* Adjusted padding */
+  border-radius: 18px; /* More rounded corners */
+  max-width: 85%; /* Slightly wider max width */
+  color: #333;
+  line-height: 1.4;
+  word-wrap: break-word; /* Ensure long words break */
+}
+
+/* User message specific styles */
+.userMessage {
+  background-color: #007bff; /* Keep blue for user */
+  color: white;
+  align-self: flex-end;
+  margin-left: auto;
+}
+
+/* Agent message specific styles */
+.agentMessage {
+  background-color: #e9ecef; /* Lighter grey for agent */
+  color: #333;
+  align-self: flex-start;
+  margin-right: auto;
+}
+
+/* Container for input field and button */
+.inputContainer {
+  display: flex;
+  align-items: center;
+  padding-top: 5px; /* Add slight padding above input area */
+}
+
 .inputField {
   flex-grow: 1;
-  padding: 10px 8px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  /* Remove right border radius as button will be separate */
-  /* border-radius: 4px 0 0 4px; */ 
+  padding: 10px 12px; /* Increased padding */
+  border: 1px solid #d1d1d1; /* Slightly softer border */
+  border-radius: 18px; /* Match message bubble rounding */
   outline: none;
   transition: border-color 0.2s ease-in-out;
   font-size: 14px; /* Match container font size */
+  margin-right: 8px; /* Space between input and button */
 }
 
 .inputField:focus {
@@ -16,17 +75,17 @@
 
 .sendButton {
   padding: 8px 15px;
-  border: 1px solid #007bff;
+  border: none; /* Remove border */
   background-color: #007bff;
   color: white;
-  border-radius: 4px;
-  /* Remove left border radius */
-  /* border-radius: 0 4px 4px 0; */ 
+  border-radius: 18px; /* Match input rounding */
   cursor: pointer;
   outline: none;
   transition: background-color 0.2s ease-in-out, opacity 0.2s ease-in-out;
-  margin-left: 5px; /* Add separation between input and button */
-  font-size: 14px; /* Match container font size */
+  /* margin-left: 5px; */ /* Removed, using margin-right on input */
+  font-size: 14px;
+  font-weight: 500; /* Slightly bolder text */
+  white-space: nowrap; /* Prevent text wrapping */
 }
 
 .sendButton:hover:not(:disabled) {
@@ -35,6 +94,6 @@
 
 .sendButton:disabled {
   background-color: #007bff;
-  opacity: 0.6;
+  opacity: 0.5; /* Slightly more faded when disabled */
   cursor: not-allowed;
 }
