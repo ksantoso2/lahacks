@@ -3,7 +3,6 @@ import json
 import uvicorn
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from starlette.middleware.sessions import SessionMiddleware
 
 # Import routers from other modules
 from auth import router as auth_router
@@ -14,9 +13,6 @@ from chat import router as chat_router
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1' # For local development over HTTP
 
 app = FastAPI()
-
-# Session middleware - needed for session handling
-app.add_middleware(SessionMiddleware, secret_key=os.getenv("SESSION_SECRET_KEY", "a_default_secret_key_if_not_set")) # Use env var or default
 
 # CORS middleware to allow requests from frontend
 frontend_origins = [
@@ -64,4 +60,12 @@ if __name__ == "__main__":
     check_client_secret() # Check for credentials file before starting
     print(f"Starting server on http://0.0.0.0:8000")
     print(f"Allowed frontend origins: {frontend_origins}")
+    # Make sure google-auth is installed
+    try:
+        import google.auth
+        print("google-auth library found.")
+    except ImportError:
+        print("\nERROR: google-auth library not found. Please install it: pip install google-auth\n")
+        # Optionally exit or raise an error here
+    
     uvicorn.run(app, host="0.0.0.0", port=8000)
