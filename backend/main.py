@@ -9,6 +9,7 @@ import os
 import json
 import uvicorn
 from datetime import datetime
+import httpx
 
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1' # ADD THIS LINE FOR LOCAL DEV
 
@@ -44,6 +45,10 @@ def get_auth_credentials(request: Request):
 # Google OAuth settings
 SCOPES = ["https://www.googleapis.com/auth/drive.file", "https://www.googleapis.com/auth/documents"]
 REDIRECT_URI = "http://localhost:8000/oauth2callback"
+
+# --- Configuration ---
+# Replace with your deployed Apps Script Web App URL
+APPS_SCRIPT_URL = "YOUR_APPS_SCRIPT_WEB_APP_URL"
 
 @app.get("/")
 async def root():  
@@ -138,6 +143,47 @@ async def generate_quiz(request: Request, quiz_data: QuizRequest, credentials: D
         ]
     }
 
+async def call_apps_script(action: str, payload: dict, script_token: Optional[str] = None):
+    """Sends a POST request to the Apps Script Web App endpoint."""
+    if not APPS_SCRIPT_URL or APPS_SCRIPT_URL == "YOUR_APPS_SCRIPT_WEB_APP_URL":
+        print("ERROR: APPS_SCRIPT_URL is not configured in main.py")
+        return {"error": "Backend configuration error: Apps Script URL not set."}
+
+    headers = {
+        'Content-Type': 'application/json',
+    }
+    # If your Apps Script requires authentication, pass the token.
+    # Make sure your Apps Script *validates* this token!
+    if script_token:
+        headers['Authorization'] = f'Bearer {script_token}'
+
+    request_body = {
+        "action": action,
+        "data": payload
+    }
+
+    async with httpx.AsyncClient() as client:
+        try:
+            print(f"Calling Apps Script: {action} with payload: {payload}") # Debug log
+            response = await client.post(APPS_SCRIPT_URL, json=request_body, headers=headers, timeout=30.0) # Added timeout
+            response.raise_for_status() # Raise an exception for bad status codes (4xx or 5xx)
+            
+            # Try to parse JSON, fall back to text if it fails
+            try:
+                return response.json()
+            except json.JSONDecodeError:
+                return {"response_text": response.text} # Return raw text if not JSON
+
+        except httpx.HTTPStatusError as exc:
+            print(f"HTTP error calling Apps Script: {exc.response.status_code} - {exc.response.text}")
+            return {"error": f"Apps Script Error: {exc.response.status_code}", "details": exc.response.text}
+        except httpx.RequestError as exc:
+            print(f"Request error calling Apps Script: {exc}")
+            return {"error": f"Could not connect to Apps Script: {exc}"}
+        except Exception as e:
+            print(f"Generic error calling Apps Script: {e}")
+            return {"error": f"An unexpected error occurred: {e}"}
+
 if __name__ == "__main__":
     # Create a sample client_secret.json file if it doesn't exist
     # This is just for testing - in production, you'd use your actual Google OAuth credentials
@@ -159,4 +205,3 @@ if __name__ == "__main__":
         print("Sample client_secret.json created. Replace with real credentials for production use.")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
-    
