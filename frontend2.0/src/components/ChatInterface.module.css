@@ -133,3 +133,19 @@
 .confirmButtonNo:hover {
   background-color: #c82333;
 }
+
+/* Style for the Regenerate button */
+.confirmButtonRegen {
+  padding: 6px 12px;
+  border-radius: 5px;
+  border: 1px solid #ffc107; /* Amber border */
+  background-color: #fff3cd; /* Light amber background */
+  color: #856404; /* Dark amber text */
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.confirmButtonRegen:hover {
+  background-color: #ffeeba;
+  border-color: #ffb300;
+}

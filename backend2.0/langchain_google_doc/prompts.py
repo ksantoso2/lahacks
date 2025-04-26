@@ -2,8 +2,8 @@ from langchain.prompts import PromptTemplate
 
 # Prompt for generating the main document content
 content_generation_template = """
-Based on the topic "{topic}", please generate comprehensive and well-structured content suitable for a Google Document.
-The content should be informative and cover the key aspects of the topic.
+Based on these instructions: "{topic}", please generate comprehensive and well-structured content suitable for a Google Document.
+The content should be as informative as the user requests it to be.
 Format the output clearly.
 
 Generated Content:
