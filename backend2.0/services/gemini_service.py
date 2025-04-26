@@ -78,18 +78,17 @@ async def generate_doc_preview(file_name: str) -> str:
     
 async def generate_gemini_response(prompt: str) -> str:
     try:
-        # Custom prompt specific to this function
+        # Enhance prompt for document creation
+        full_prompt = f"Generate detailed content for a Google Doc based on this request: {prompt}"
         model = genai.GenerativeModel(
             GEMINI_MODEL_NAME,
-            system_instruction="You are a response generator for any queries."
+            system_instruction="You are a document content generator."
         )
-        response = await model.generate_content_async(prompt)
-        return response.text
+        response = await model.generate_content_async(full_prompt)
+        return response.text.strip()
     except Exception as e:
-        return "⚠️ Gemini failed to generate a response."
-
-        print(f"Error during Gemini parsing call: {e}")
-        return {"error": f"Failed to parse user message: {e}"}
+        print(f"Error during Gemini content generation: {e}")
+        return "⚠️ Failed to generate document content."
 
 # Example usage (for testing):
 # if __name__ == "__main__":
