@@ -11,44 +11,29 @@ function App() {
 
   const backendUrl = 'http://localhost:8000'; // Your backend URL
 
-  // Check URL fragment for token on component mount
   useEffect(() => {
-    const hash = window.location.hash;
-    let token = null;
-    let error = null;
-
-    if (hash.startsWith('#id_token=')) {
-      token = hash.substring('#id_token='.length);
-      console.log("ID Token found in URL fragment (first 10 chars):", token.substring(0, 10) + "...");
-      
-      // Optional: Decode token locally to show user info (requires jwt-decode library)
-      // try {
-      //   const decoded = jwtDecode(token);
-      //   console.log("Decoded user info:", decoded);
-      // } catch (e) { console.error("Failed to decode token", e); }
-
-      // Clean the URL fragment
-      window.location.hash = ''; 
-      // Or use history API for cleaner removal without page jump:
-      // if (history.pushState) {
-      //   history.pushState("", document.title, window.location.pathname + window.location.search);
-      // } else {
-      //   window.location.hash = ''; // Fallback
-      // }
-      
-      setAuthToken(token);
-    } else if (hash.startsWith('#error=')) {
-        // Handle potential errors passed in the fragment (less common)
-        error = decodeURIComponent(hash.substring('#error='.length));
-        console.error("Error received in URL fragment:", error);
-        setAuthError(`Login failed: ${error}`);
-        window.location.hash = ''; // Clear error hash
+    const hash = window.location.hash.substring(1); // Remove leading '#'
+    const params = new URLSearchParams(hash);
+  
+    const accessToken = params.get('access_token');
+    const idToken = params.get('id_token');
+  
+    if (accessToken) {
+      console.log("✅ Access Token found:", accessToken.substring(0, 10) + "...");
+      setAuthToken(accessToken);  // ✅ Now backend will get access token, not ID token
+    } else if (idToken) {
+      console.warn("⚠️ Only ID token found, no access token.");
+      setAuthToken(idToken); // Fallback (optional)
+    } else {
+      console.error("❌ No tokens found in URL fragment.");
     }
-    
-    // Finished checking the hash
+  
+    // OPTIONAL: Clear URL fragment after parsing
+    window.history.replaceState(null, "", window.location.pathname);
+  
     setIsLoadingToken(false);
-
-  }, []); // Run only once on mount
+  }, []);
+  
 
   // Function to initiate the local login flow
   const handleLocalLogin = () => {
