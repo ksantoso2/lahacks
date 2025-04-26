@@ -7,18 +7,27 @@ import io
 
 async def create_google_doc(title: str, access_token: str):
     """
-    Creates a Google Doc with the given title.
+    Creates a Google Doc with the given title and optional content.
     Returns (docId, docUrl).
     """
     creds = Credentials(token=access_token)
     service = build('docs', 'v1', credentials=creds)
 
-    document = service.documents().create(body={
-        "title": title
-    }).execute()
-
+    document = service.documents().create(body={"title": title}).execute()
     doc_id = document.get('documentId')
     doc_url = f"https://docs.google.com/document/d/{doc_id}/edit"
+
+    
+    requests = [
+        {
+            'insertText': {
+                'location': {'index': 1},
+                'text': 'hello world yayayay' # Placeholder content, should include information related to title
+            }
+        }
+    ]
+    service.documents().batchUpdate(documentId=doc_id, body={'requests': requests}).execute()
+
     return doc_id, doc_url
 
 async def get_drive_item_content(target_name: str, access_token: str) -> str | None:
