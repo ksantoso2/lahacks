@@ -1,5 +1,6 @@
 fastapi
 uvicorn
+python-dotenv
 python-multipart
 itsdangerous
 httpx
