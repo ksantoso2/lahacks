@@ -1,0 +1,12 @@
+fastapi
+uvicorn
+python-multipart
+itsdangerous
+httpx
+
+google-auth
+google-auth-oauthlib
+google-api-python-client
+google-generativeai
+
+pydantic
