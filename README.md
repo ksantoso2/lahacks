@@ -1,0 +1,21 @@
+## To run backend:
+
+1. Create a virtual environment and install requirements
+
+```
+cd backend
+python3 -m venv venv # only need to run once
+
+source venv/bin/activate # on MacOS
+venv\Scripts\activate # on Windows
+
+pip install -r requirements.txt # run every time new dependencies are added
+```
+
+2. Start server
+
+```
+python3 server.py
+```
+
+Backend should be running on http://localhost:5000/
