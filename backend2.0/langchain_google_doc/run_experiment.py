@@ -1,0 +1,104 @@
+import asyncio
+import argparse
+import os.path
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+
+from .doc_gen_chain import run_generation_with_hitl
+
+# Define the scopes required by your application
+# If modifying these scopes, delete the file token.json.
+SCOPES = ['https://www.googleapis.com/auth/drive'] # Or ['https://www.googleapis.com/auth/documents']
+# Path to store the user's access and refresh tokens.
+TOKEN_PATH = 'token.json' # Stores token in the directory where the script is run (backend2.0)
+# Path to your client secrets file.
+# Assumes client_secret.json is in the same directory where the script is run (backend2.0)
+CLIENT_SECRETS_PATH = 'client_secret.json'
+
+async def get_google_credentials():
+    """Gets valid Google credentials, handling the OAuth flow if necessary."""
+    creds = None
+    # The file token.json stores the user's access and refresh tokens, and is
+    # created automatically when the authorization flow completes for the first
+    # time.
+    if os.path.exists(TOKEN_PATH):
+        creds = Credentials.from_authorized_user_file(TOKEN_PATH, SCOPES)
+    # If there are no (valid) credentials available, let the user log in.
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            try:
+                print("Refreshing access token...")
+                creds.refresh(Request())
+            except Exception as e:
+                print(f"Error refreshing token: {e}. Need to re-authenticate.")
+                creds = None # Force re-authentication
+        if not creds: # Needs full authentication flow
+            if not os.path.exists(CLIENT_SECRETS_PATH):
+                raise FileNotFoundError(
+                    f"Client secrets file not found at: {os.path.abspath(CLIENT_SECRETS_PATH)}\
+"+
+                    "Please ensure 'client_secret.json' is in the backend2.0 directory."
+                )
+            print("Starting authentication flow...")
+            flow = InstalledAppFlow.from_client_secrets_file(
+                CLIENT_SECRETS_PATH, SCOPES)
+            # port=0 means it finds an available port automatically
+            # Let's use a fixed port (e.g., 8000) for easier redirect URI configuration
+            print("Starting local server for authentication on port 8000...")
+            creds = flow.run_local_server(port=8000)
+        # Save the credentials for the next run
+        with open(TOKEN_PATH, 'w') as token_file:
+            token_file.write(creds.to_json())
+            print(f"Credentials saved to {TOKEN_PATH}")
+
+    if not creds or not creds.token:
+         raise Exception("Failed to obtain valid Google credentials.")
+
+    return creds
+
+# --- !!! IMPORTANT !!! ---
+# This script requires a valid Google OAuth Access Token with Drive/Docs scopes.
+# For a real application, this token would be obtained via a proper OAuth flow.
+# For this experiment, you need to provide it manually via command line argument
+# or hardcode it (NOT RECOMMENDED for anything other than temporary testing).
+# --- / IMPORTANT ---
+
+async def main():
+    parser = argparse.ArgumentParser(description="Generate and create a Google Doc using LangChain and Gemini.")
+    parser.add_argument("topic", help="The topic for the Google Document.")
+    # parser.add_argument(
+    #     "--token",
+    #     required=True,
+    #     help="Your Google OAuth Access Token (required for creating the doc)."
+    # )
+    args = parser.parse_args()
+
+    print("Acquiring Google credentials...")
+    try:
+        credentials = await get_google_credentials()
+        access_token = credentials.token
+    except Exception as e:
+        print(f"Error getting credentials: {e}")
+        return
+
+    if not access_token:
+        print("Could not obtain access token.")
+        return
+
+    print(f"Starting experiment for topic: {args.topic}")
+    # Pass the obtained access token to the chain function
+    result = await run_generation_with_hitl(topic=args.topic, access_token=access_token)
+    print("\n" + "="*30)
+    print("Experiment Result:")
+    print(result)
+    print("="*30)
+
+if __name__ == "__main__":
+    # Ensure you are in the backend2.0 directory when running,
+    # or adjust Python path so imports work.
+    # Example Run:
+    # python -m langchain.run_experiment "The History of LangChain" --token YOUR_ACCESS_TOKEN_HERE
+    # NEW Example Run (no --token needed):
+    # python3 -m langchain.run_experiment "The Future of AI"
+    asyncio.run(main())
