@@ -48,24 +48,14 @@ const styles = {
   },
 };
 
-function ChatInterface() {
+// Accept props, specifically backendUrl and authToken
+function ChatInterface({ backendUrl, authToken }) {
   const [messages, setMessages] = useState([
     { sender: 'agent', text: 'Hello! How can I help you with your Google Drive files today?' },
   ]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [scriptToken, setScriptToken] = useState(null);
   const messagesEndRef = useRef(null);
-
-  // Extract scriptToken from URL on component mount
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const token = params.get('scriptToken');
-    if (token) {
-      setScriptToken(decodeURIComponent(token));
-      console.log("Script Token Found (truncated):", token.substring(0, 10) + '...');
-    }
-  }, []);
 
   // Scroll to bottom when new messages arrive
   useEffect(() => {
@@ -90,13 +80,17 @@ function ChatInterface() {
 
     try {
       // --- API Call to Backend ---
-      // Replace with your actual backend URL
-      const backendUrl = 'http://localhost:8000/api/chat'; 
+      // Use the backendUrl prop passed from App.jsx
+      const chatApiUrl = `${backendUrl}/api/chat`;
       
-      const response = await axios.post(backendUrl, {
+      // Make sure to send the token in the Authorization header
+      const response = await axios.post(chatApiUrl, { 
         message: userMessage,
-        scriptToken: scriptToken, // Send token if available
-      });
+      }, { 
+        headers: {
+          'Authorization': `Bearer ${authToken}` // Send the token
+        },
+      }); 
 
       // Add agent response to chat
       if (response.data && response.data.response) {
@@ -112,7 +106,8 @@ function ChatInterface() {
         ...prevMessages,
         {
           sender: 'agent',
-          text: `Sorry, I encountered an error. ${error.response?.data?.detail || error.message}`,
+          // Improved error display - check for specific backend errors if possible
+          text: `Sorry, I encountered an error. ${error.response?.data?.detail || error.response?.data?.error || error.message}`,
         },
       ]);
     } finally {

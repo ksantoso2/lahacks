@@ -2,16 +2,18 @@ import os
 import json
 import httpx
 import google.generativeai as genai
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Request, HTTPException, Depends 
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
+
+# Import the dependency function and Credentials type from auth.py
+from auth import verify_google_token 
 
 router = APIRouter() # Use APIRouter for modular routes
 
 # --- Models --- 
 class ChatMessage(BaseModel):
     message: str
-    scriptToken: Optional[str] = None
 
 # --- Configuration --- 
 
@@ -90,22 +92,16 @@ async def get_instructions_from_gemini(user_message: str) -> dict:
         #     return {"error": "Invalid Gemini API Key"} 
         return {"error": f"Gemini API Error: {e}"}
 
-async def call_apps_script(action: str, payload: dict, script_token: Optional[str] = None) -> Dict[str, Any]:
-    """Sends a POST request to the Apps Script Web App endpoint."""
+async def call_apps_script(action: str, payload: dict, user_token: str) -> Dict[str, Any]:
+    """Sends a POST request to the Apps Script Web App endpoint using the user's OAuth token."""
     if not APPS_SCRIPT_URL or APPS_SCRIPT_URL == "YOUR_APPS_SCRIPT_WEB_APP_URL":
         print("APPS_SCRIPT_URL is not configured.")
         return {"error": "Backend configuration error", "details": "APPS_SCRIPT_URL not set."}
 
     headers = {
         "Content-Type": "application/json",
+        "Authorization": f"Bearer {user_token}" # Use the user's OAuth token
     }
-    # Add Authorization header if token exists
-    if script_token:
-        headers["Authorization"] = f"Bearer {script_token}"
-        print(f"Adding Authorization header for Apps Script call.") # Debug log
-    else:
-        # If Apps Script requires auth, this call will likely fail without a token
-        print("No script_token provided for Apps Script call.") 
 
     request_body = {
         "action": action,
@@ -118,6 +114,11 @@ async def call_apps_script(action: str, payload: dict, script_token: Optional[st
             response = await client.post(APPS_SCRIPT_URL, json=request_body, headers=headers)
             response.raise_for_status()  # Raise an exception for bad status codes (4xx or 5xx)
             print(f"Apps Script Response Status: {response.status_code}")
+            # Check if response is empty before trying to decode JSON
+            if not response.content:
+                print("Apps Script returned empty response.")
+                # Decide what to return in this case, maybe success with empty body?
+                return {"status": "success", "details": "Action performed, no content returned."}
             return response.json()
         except httpx.HTTPStatusError as exc:
             error_details = f"HTTP error calling Apps Script: {exc.response.status_code} - {exc.response.text}"
@@ -141,11 +142,14 @@ async def call_apps_script(action: str, payload: dict, script_token: Optional[st
 # --- Chat Route --- 
 
 @router.post("/api/chat")
-async def handle_chat(chat_message: ChatMessage, request: Request):
+# Use the new token verification dependency
+# It returns a tuple: (raw_token_string, decoded_id_info_dict)
+async def handle_chat(chat_message: ChatMessage, request: Request, token_info: tuple[str, dict] = Depends(verify_google_token)):
     user_message = chat_message.message
-    token = chat_message.scriptToken # Passed from frontend (needs validation on Apps Script side)
+    # Get the raw token string from the dependency result
+    user_oauth_token, id_info = token_info 
     
-    print(f"User Message: {user_message}, Token provided: {'Yes' if token else 'No'}")
+    print(f"User Message: {user_message}, Token verified for: {id_info.get('email')}")
 
     # --- 1. Get Instructions from Gemini --- 
     instructions = await get_instructions_from_gemini(user_message)
@@ -172,7 +176,8 @@ async def handle_chat(chat_message: ChatMessage, request: Request):
         
         elif action in ["listFiles", "createDoc", "deleteFile"]:
             payload = {k: v for k, v in instructions.items() if k != 'action_to_perform'}
-            apps_script_response = await call_apps_script(action, payload, token)
+            # Pass the user's verified OAuth token to call_apps_script
+            apps_script_response = await call_apps_script(action, payload, user_oauth_token)
             
             # Formulate response based on Apps Script result
             if apps_script_response and 'error' in apps_script_response:

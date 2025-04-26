@@ -12,3 +12,4 @@ google-api-python-client==2.100.0
 python-multipart==0.0.6
 httpx # Added for making async HTTP requests
 google-generativeai # Added for Gemini API
+google-auth # Add this line
