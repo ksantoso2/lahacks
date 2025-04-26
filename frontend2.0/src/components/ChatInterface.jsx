@@ -93,12 +93,17 @@ function ChatInterface({ backendUrl, authToken }) {
       }); 
 
       // Add agent response to chat
-      if (response.data && response.data.response) {
+      if (response.data && response.data.message) {
         setMessages((prevMessages) => [
           ...prevMessages,
-          { sender: 'agent', text: response.data.response },
+          { sender: 'agent', text: response.data.message },
         ]);
-      }
+      } else if (response.data && response.data.geminiParsed) {
+        setMessages((prevMessages) => [
+          ...prevMessages,
+          { sender: 'agent', text: `Gemini parsed: ${JSON.stringify(response.data.geminiParsed)}` },
+        ]);
+      }      
     } catch (error) {
       console.error('Error sending message:', error);
       // Add error message to chat
