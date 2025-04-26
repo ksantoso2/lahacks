@@ -164,25 +164,27 @@ const Dashboard = () => {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center">
-          <p className="text-xl">Loading...</p>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh' }}>
+        <div style={{ textAlign: 'center' }}>
+          <p style={{ fontSize: '1.25rem' }}>Loading...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-100">
-      <header className="bg-white shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
-          <h1 className="text-2xl font-bold text-gray-900">[Name In Progress]</h1>
+    <div style={{ minHeight: '100vh', backgroundColor: '#f3f4f6' }}>
+      <header style={{ backgroundColor: 'white', boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)' }}>
+        <div style={{ maxWidth: '80rem', margin: '0 auto', padding: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h1 style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#111827' }}>[Name In Progress]</h1>
           {user && (
-            <div className="flex items-center gap-4">
-              <span className="text-sm text-gray-600">{user.email}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+              <span style={{ fontSize: '0.875rem', color: '#4b5563' }}>{user.email}</span>
               <button 
                 onClick={handleSignOut}
-                className="text-sm text-red-600 hover:text-red-700"
+                style={{ fontSize: '0.875rem', color: '#dc2626', cursor: 'pointer' }}
+                onMouseEnter={(e) => e.target.style.color = '#b91c1c'}
+                onMouseLeave={(e) => e.target.style.color = '#dc2626'}
               >
                 Sign Out
               </button>
@@ -191,14 +193,14 @@ const Dashboard = () => {
         </div>
       </header>
       
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="bg-white shadow-md rounded-lg p-6 mb-8">
-          <h2 className="text-xl font-semibold mb-4">Study Session</h2>
+      <main style={{ maxWidth: '80rem', margin: '0 auto', padding: '2rem 1rem' }}>
+        <div style={{ backgroundColor: 'white', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)', borderRadius: '0.5rem', padding: '1.5rem', marginBottom: '2rem' }}>
+          <h2 style={{ fontSize: '1.25rem', fontWeight: '600', marginBottom: '1rem' }}>Study Session</h2>
           
           {!isStudying ? (
             <div>
               {studyEndTime && (
-                <div className="mb-4 p-3 bg-green-100 rounded">
+                <div style={{ marginBottom: '1rem', padding: '0.75rem', backgroundColor: '#dcfce7', borderRadius: '0.25rem' }}>
                   <p>Last study session ended: {studyEndTime.toLocaleString()}</p>
                   <p>Duration: {Math.round((studyEndTime - studyStartTime) / 60000)} minutes</p>
                 </div>
@@ -206,16 +208,16 @@ const Dashboard = () => {
               
               <button 
                 onClick={startStudySession}
-                className="btn-primary"
+                style={{ backgroundColor: '#4285f4', color: 'white', padding: '8px 16px', borderRadius: '4px', cursor: 'pointer' }}
               >
                 Start Study Session
               </button>
               
               {studyEndTime && (
-                <div className="mt-8 space-y-4">
+                <div style={{ marginTop: '2rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                   <button 
                     onClick={generateStudyGuide}
-                    className="btn-primary mr-4"
+                    style={{ backgroundColor: '#4285f4', color: 'white', padding: '8px 16px', borderRadius: '4px', marginRight: '1rem', cursor: generatingStudyGuide ? 'not-allowed' : 'pointer', opacity: generatingStudyGuide ? 0.7 : 1 }}
                     disabled={generatingStudyGuide}
                   >
                     {generatingStudyGuide ? 'Generating...' : 'Generate Study Guide'}
@@ -223,7 +225,7 @@ const Dashboard = () => {
                   
                   <button 
                     onClick={generateQuiz}
-                    className="btn-primary"
+                    style={{ backgroundColor: '#4285f4', color: 'white', padding: '8px 16px', borderRadius: '4px', cursor: generatingQuiz ? 'not-allowed' : 'pointer', opacity: generatingQuiz ? 0.7 : 1 }}
                     disabled={generatingQuiz}
                   >
                     {generatingQuiz ? 'Generating...' : 'Generate Quiz'}
@@ -232,14 +234,14 @@ const Dashboard = () => {
               )}
             </div>
           ) : (
-            <div className="text-center">
-              <p className="text-lg mb-4">Study session in progress...</p>
-              <p className="mb-4">Started at: {studyStartTime.toLocaleString()}</p>
-              <p className="mb-8">Time elapsed: {Math.round((new Date() - studyStartTime) / 60000)} minutes</p>
+            <div style={{ textAlign: 'center' }}>
+              <p style={{ fontSize: '1.125rem', marginBottom: '1rem' }}>Study session in progress...</p>
+              <p style={{ marginBottom: '1rem' }}>Started at: {studyStartTime.toLocaleString()}</p>
+              <p style={{ marginBottom: '2rem' }}>Time elapsed: {Math.round((new Date() - studyStartTime) / 60000)} minutes</p>
               
               <button 
                 onClick={stopStudySession}
-                className="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 transition-colors duration-300"
+                style={{ backgroundColor: '#dc2626', color: 'white', padding: '8px 16px', borderRadius: '4px', cursor: 'pointer' }}
               >
                 Stop Study Session
               </button>
@@ -248,29 +250,29 @@ const Dashboard = () => {
         </div>
         
         {studyGuide && (
-          <div className="bg-white shadow-md rounded-lg p-6 mb-8">
-            <h2 className="text-xl font-semibold mb-4">{studyGuide.title}</h2>
-            <div className="prose max-w-none">
+          <div style={{ backgroundColor: 'white', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)', borderRadius: '0.5rem', padding: '1.5rem', marginBottom: '2rem' }}>
+            <h2 style={{ fontSize: '1.25rem', fontWeight: '600', marginBottom: '1rem' }}>{studyGuide.title}</h2>
+            <div style={{ maxWidth: 'none' }}>
               <p>{studyGuide.content}</p>
             </div>
           </div>
         )}
         
         {quiz && (
-          <div className="bg-white shadow-md rounded-lg p-6">
-            <h2 className="text-xl font-semibold mb-4">{quiz.title}</h2>
-            <div className="space-y-6">
+          <div style={{ backgroundColor: 'white', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)', borderRadius: '0.5rem', padding: '1.5rem' }}>
+            <h2 style={{ fontSize: '1.25rem', fontWeight: '600', marginBottom: '1rem' }}>{quiz.title}</h2>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
               {quiz.questions.map((q, index) => (
-                <div key={index} className="p-4 border border-gray-200 rounded">
-                  <p className="font-medium mb-3">{q.question}</p>
-                  <div className="space-y-2">
+                <div key={index} style={{ padding: '1rem', border: '1px solid #e5e7eb', borderRadius: '0.25rem' }}>
+                  <p style={{ fontWeight: '500', marginBottom: '0.75rem' }}>{q.question}</p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                     {q.options.map((option, optionIndex) => (
-                      <div key={optionIndex} className="flex items-center">
+                      <div key={optionIndex} style={{ display: 'flex', alignItems: 'center' }}>
                         <input 
                           type="radio" 
                           name={`question-${index}`} 
                           id={`question-${index}-option-${optionIndex}`}
-                          className="mr-2"
+                          style={{ marginRight: '0.5rem' }}
                         />
                         <label htmlFor={`question-${index}-option-${optionIndex}`}>
                           {option}
