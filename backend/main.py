@@ -65,7 +65,7 @@ else:
         GEMINI_API_KEY = None # Disable Gemini if config fails
 
 # Gemini Model Configuration
-GEMINI_MODEL_NAME = "gemini-1.5-flash" # Or another suitable model
+GEMINI_MODEL_NAME = "gemini-2.0-flash" # Or another suitable model
 GEMINI_SYSTEM_PROMPT = """You are an instruction analyzer that parses the text request of a user using a Google Drive related AI Agent. You are looking for several specific types of instructions, which you will send back in the form of a json object containing ONLY the fields relevant to the detected instruction. DO NOT add any explanation or surrounding text, ONLY output the JSON.
 
 The instructions and corresponding JSON fields are:
@@ -288,43 +288,48 @@ async def get_instructions_from_gemini(user_message: str) -> dict:
 async def call_apps_script(action: str, payload: dict, script_token: Optional[str] = None):
     """Sends a POST request to the Apps Script Web App endpoint."""
     if not APPS_SCRIPT_URL or APPS_SCRIPT_URL == "YOUR_APPS_SCRIPT_WEB_APP_URL":
-        print("ERROR: APPS_SCRIPT_URL is not configured in main.py")
-        return {"error": "Backend configuration error: Apps Script URL not set."}
+        print("APPS_SCRIPT_URL is not configured.")
+        return {"error": "Backend configuration error", "details": "APPS_SCRIPT_URL not set."}
 
     headers = {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
     }
-    # If your Apps Script requires authentication, pass the token.
-    # Make sure your Apps Script *validates* this token!
+    # --- Add Authorization header if token exists --- 
     if script_token:
-        headers['Authorization'] = f'Bearer {script_token}'
+        headers["Authorization"] = f"Bearer {script_token}"
+        print(f"Adding Authorization header for Apps Script call.") # Debug log
+    else:
+        print("No script_token provided for Apps Script call.") # Debug log
 
     request_body = {
         "action": action,
-        "data": payload
+        "data": payload,
+        # Add any other necessary parameters required by your Apps Script
     }
 
     async with httpx.AsyncClient() as client:
         try:
-            print(f"Calling Apps Script: {action} with payload: {payload}") # Debug log
-            response = await client.post(APPS_SCRIPT_URL, json=request_body, headers=headers, timeout=30.0) # Added timeout
-            response.raise_for_status() # Raise an exception for bad status codes (4xx or 5xx)
-            
-            # Try to parse JSON, fall back to text if it fails
-            try:
-                return response.json()
-            except json.JSONDecodeError:
-                return {"response_text": response.text} # Return raw text if not JSON
-
+            print(f"Calling Apps Script: {APPS_SCRIPT_URL} with action: {action}")
+            response = await client.post(APPS_SCRIPT_URL, json=request_body, headers=headers)
+            response.raise_for_status()  # Raise an exception for bad status codes (4xx or 5xx)
+            print(f"Apps Script Response Status: {response.status_code}")
+            return response.json()
         except httpx.HTTPStatusError as exc:
-            print(f"HTTP error calling Apps Script: {exc.response.status_code} - {exc.response.text}")
-            return {"error": f"Apps Script Error: {exc.response.status_code}", "details": exc.response.text}
+            error_details = f"HTTP error calling Apps Script: {exc.response.status_code} - {exc.response.text}"
+            print(error_details)
+            return {"error": "Apps Script communication failed", "details": error_details}
         except httpx.RequestError as exc:
-            print(f"Request error calling Apps Script: {exc}")
-            return {"error": f"Could not connect to Apps Script: {exc}"}
+            error_details = f"Request error calling Apps Script: {exc}"
+            print(error_details)
+            return {"error": "Apps Script communication failed", "details": error_details}
+        except json.JSONDecodeError as exc:
+            error_details = f"Failed to decode JSON response from Apps Script: {exc} - Response text: {response.text[:200]}..."
+            print(error_details)
+            return {"error": "Invalid response from Apps Script", "details": error_details}
         except Exception as e:
-            print(f"Generic error calling Apps Script: {e}")
-            return {"error": f"An unexpected error occurred: {e}"}
+            error_details = f"An unexpected error occurred during Apps Script call: {e}"
+            print(error_details)
+            return {"error": "Unexpected backend error", "details": error_details}
 
 if __name__ == "__main__":
     # Create a sample client_secret.json file if it doesn't exist
