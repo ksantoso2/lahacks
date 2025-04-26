@@ -1,44 +1,26 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '../utils/supabase';
 
 const Login = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // Check if user is already logged in
-  useEffect(() => {
-    const checkUser = async () => {
-      const { data } = await supabase.auth.getSession();
-      if (data.session) {
-        navigate('/dashboard');
-      }
-    };
-    
-    checkUser();
-  }, [navigate]);
-
-  const handleGoogleSignIn = async () => {
+  // We'll handle authentication through the backend now
+  const handleGoogleSignIn = () => {
     try {
       setLoading(true);
       setError(null);
       
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          scopes: 'https://www.googleapis.com/auth/drive.readonly',
-          redirectTo: `${window.location.origin}/dashboard`
-        }
-      });
-
-      if (error) {
-        setError(error.message);
-      }
+      // Redirect to the backend's login endpoint
+      // This will start the Google OAuth flow
+      window.location.href = 'http://localhost:8000/login';
+      
+      // Note: The backend should redirect back to the frontend after authentication
+      // We'll need to set up a callback route in the frontend to handle this
     } catch (err) {
       setError('An error occurred during sign in. Please try again.');
       console.error(err);
-    } finally {
       setLoading(false);
     }
   };
