@@ -81,7 +81,7 @@ function ChatInterface({ backendUrl, authToken }) {
     try {
       // --- API Call to Backend ---
       // Use the backendUrl prop passed from App.jsx
-      const chatApiUrl = `${backendUrl}/api/chat`;
+      const chatApiUrl = `${backendUrl}/api/ask`;
       
       // Make sure to send the token in the Authorization header
       const response = await axios.post(chatApiUrl, { 
