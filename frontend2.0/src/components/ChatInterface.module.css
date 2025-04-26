@@ -1,0 +1,40 @@
+.inputField {
+  flex-grow: 1;
+  padding: 10px 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  /* Remove right border radius as button will be separate */
+  /* border-radius: 4px 0 0 4px; */ 
+  outline: none;
+  transition: border-color 0.2s ease-in-out;
+  font-size: 14px; /* Match container font size */
+}
+
+.inputField:focus {
+  border-color: #007bff;
+}
+
+.sendButton {
+  padding: 8px 15px;
+  border: 1px solid #007bff;
+  background-color: #007bff;
+  color: white;
+  border-radius: 4px;
+  /* Remove left border radius */
+  /* border-radius: 0 4px 4px 0; */ 
+  cursor: pointer;
+  outline: none;
+  transition: background-color 0.2s ease-in-out, opacity 0.2s ease-in-out;
+  margin-left: 5px; /* Add separation between input and button */
+  font-size: 14px; /* Match container font size */
+}
+
+.sendButton:hover:not(:disabled) {
+   background-color: #0056b3;
+}
+
+.sendButton:disabled {
+  background-color: #007bff;
+  opacity: 0.6;
+  cursor: not-allowed;
+}

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios'; // Import axios for API calls
+import stylesModule from './ChatInterface.module.css'; // Import CSS Module
 
 // Basic styling - can be expanded or moved to CSS file
 const styles = {
@@ -9,7 +10,8 @@ const styles = {
     height: '100vh', // Use viewport height to fill sidebar
     boxSizing: 'border-box',
     padding: '10px',
-    fontFamily: 'Arial, sans-serif',
+    // Use a modern system font stack for better appearance
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol"',
     fontSize: '14px',
   },
   messagesContainer: {
@@ -27,12 +29,13 @@ const styles = {
     borderRadius: '15px',
     maxWidth: '80%',
     color: '#333', // Add default dark text color
+    textAlign: 'left', // Ensure text inside bubble is left-aligned
   },
   userMessage: {
     backgroundColor: '#d1eaff',
     alignSelf: 'flex-end',
     marginLeft: 'auto',
-    textAlign: 'right',
+    // Removed textAlign: 'right' - bubbles align right, text inside aligns left
   },
   agentMessage: {
     backgroundColor: '#e0e0e0',
@@ -41,27 +44,7 @@ const styles = {
   },
   inputContainer: {
     display: 'flex',
-  },
-  inputField: {
-    flexGrow: 1,
-    padding: '8px',
-    border: '1px solid #ccc',
-    borderRadius: '4px 0 0 4px',
-    outline: 'none',
-  },
-  sendButton: {
-    padding: '8px 15px',
-    border: '1px solid #007bff',
-    backgroundColor: '#007bff',
-    color: 'white',
-    borderRadius: '0 4px 4px 0',
-    cursor: 'pointer',
-    outline: 'none',
-  },
-  sendButtonDisabled: {
-    backgroundColor: '#a0cfff',
-    cursor: 'not-allowed',
-    border: '1px solid #a0cfff',
+    alignItems: 'center', // Align items vertically in the center
   },
 };
 
@@ -163,7 +146,7 @@ function ChatInterface() {
       <div style={styles.inputContainer}>
         <input
           type="text"
-          style={styles.inputField}
+          className={stylesModule.inputField} // Use CSS Module class
           value={inputValue}
           onChange={handleInputChange}
           onKeyDown={handleKeyDown}
@@ -171,10 +154,8 @@ function ChatInterface() {
           disabled={isLoading}
         />
         <button
-          style={{
-            ...styles.sendButton,
-            ...(isLoading ? styles.sendButtonDisabled : {}),
-          }}
+          // Combine base class with disabled class conditionally
+          className={`${stylesModule.sendButton} ${isLoading ? stylesModule.sendButtonDisabled : ''}`}
           onClick={handleSendMessage}
           disabled={isLoading}
         >
