@@ -14,8 +14,10 @@ async def handle_user_query(query: UserQuery, token_info: tuple[str, dict] = Dep
     user_message = query.message
     user_token, _ = token_info
 
-    # Step 1: Parse user intent
     parsed = await parse_user_message(user_message)
+
+    # Log parsed output for debugging
+    print("Gemini Parsed Output:", parsed)
 
     if parsed.get("action_to_perform") == "createDoc":
         file_name = parsed.get("name", "Untitled Document")
@@ -26,7 +28,9 @@ async def handle_user_query(query: UserQuery, token_info: tuple[str, dict] = Dep
             "docUrl": file_url
         }
     else:
+        # Send back Gemini's understanding as feedback
         return {
             "success": False,
-            "message": "⚠️ Sorry, only document creation is supported right now."
+            "message": "⚠️ Sorry, only document creation is supported right now.",
+            "geminiParsed": parsed
         }

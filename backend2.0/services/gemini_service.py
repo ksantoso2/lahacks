@@ -25,6 +25,7 @@ async def parse_user_message(user_message: str) -> dict:
         )
 
         response = await model.generate_content_async(user_message)
+        print(f"Gemini raw response: {response.text}")
 
         cleaned = response.text.strip().replace('```json', '').replace('```', '').strip()
         return json.loads(cleaned)
