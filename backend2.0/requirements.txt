@@ -19,6 +19,7 @@ langchain-text-splitters
 requests
 python-multipart # Often needed by FastAPI for forms
 aiohttp # Often a dependency for async libraries
+itsdangerous # Required by SessionMiddleware
 
 # Other potential direct dependencies (add if needed)
 # sqlalchemy # If using a DB directly in the backend
