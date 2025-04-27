@@ -19,19 +19,16 @@ FOLDER_MIME = "application/vnd.google-apps.folder"
 router = APIRouter()
 
 # --- Pending confirmation storage ---
-# Structure: {user_token: {'state': 'state_name', 'file_name': 'name', 'original_message': 'msg', 'preview': '...'}}
-# States: 'confirm_preview_gen', 'confirm_create'
 pending_requests = {} 
 
 # --- Chat History Storage ---
-# Structure: {user_id: [{'role': 'user'/'model', 'parts': ['message content']}]}
 chat_histories = {}
 
 class UserQuery(BaseModel):
-    message: str  # user message
-    confirmation: bool | None = None  # True/False for standard confirmation
-    regenerate: bool | None = None # True if user wants to regenerate preview
-    skip_preview: bool | None = None # True if user wants to skip preview and create directly
+    message: str
+    confirmation: bool | None = None
+    regenerate: bool | None = None
+    skip_preview: bool | None = None
 
 @router.post("/ask")
 async def handle_user_query(query: UserQuery, token_info: tuple[str, Credentials] = Depends(verify_google_token)):
@@ -342,7 +339,24 @@ async def handle_user_query(query: UserQuery, token_info: tuple[str, Credentials
                      if user_id in pending_requests:
                          del pending_requests[user_id]
                      raise HTTPException(status_code=500, detail=f"Failed to process document creation request: {e}")
+            return {
+                "success": True,
+                "message": f"I can create a document named **'{file_name}'**. Would you like me to generate a preview first?",
+                "needsConfirmation": True,
+                "confirmationType": "preview_gen"
+            }
+        except Exception as e:
+             print(f"Error initiating createDoc flow: {e}")
+             if user_id in pending_requests:
+                 del pending_requests[user_id]
+             raise HTTPException(status_code=500, detail=f"Failed to process document creation request: {e}")
 
+    elif action == "analyze":
+        target_name = parsed.get("target")
+        analysis_query = parsed.get("query")
+
+        if not analysis_query:
+            raise HTTPException(status_code=400, detail="Analysis query is missing.")
             # --- Handle Analyze Action ---
             elif action == "analyze":
                 target_name = parsed.get("target")
@@ -351,6 +365,19 @@ async def handle_user_query(query: UserQuery, token_info: tuple[str, Credentials
                 if not analysis_query:
                     raise HTTPException(status_code=400, detail="Analysis query is missing.")
 
+        file_content_context = None
+        if target_name:
+            print(f"Attempting to fetch context for target: {target_name}")
+            try:
+                file_content_context = await get_drive_item_content(target_name, creds)
+                if not file_content_context:
+                    print(f"❌ Could not find content for '{target_name}'.")
+                    raise HTTPException(status_code=404, detail=f"❌ I couldn't find a document named '{target_name}' in your Drive.")
+                else:
+                    print(f"✅ Successfully fetched file context for '{target_name}'.")
+            except Exception as e:
+                print(f"Error fetching file context for '{target_name}': {e}")
+                raise HTTPException(status_code=500, detail=f"Error accessing document '{target_name}': {e}")
                 file_content_context = None # Renamed for clarity
                 if target_name:
                     print(f"Attempting to fetch context for target: {target_name}")
@@ -396,50 +423,88 @@ async def handle_user_query(query: UserQuery, token_info: tuple[str, Credentials
                 # Unpack result and updated history
                 analysis_result_dict, updated_history = analysis_result
                 chat_histories[user_id] = updated_history # Store updated history
+        drive_index = load_index(user_id) or []
+        print(f"Loaded drive index for analysis context ({len(drive_index)} items).")
+        current_history = chat_histories.get(user_id, [])
 
-                if analysis_result_dict.get("error"):
-                    raise HTTPException(status_code=500, detail=analysis_result_dict["error"])
-                else:
+        analysis_result = await analyze_content(
+            analysis_query,
+            file_content_context=file_content_context,
+            drive_index=drive_index,
+            chat_history=current_history
+        )
+
+        # Unpack result and updated history
+        analysis_result_dict, updated_history = analysis_result
+        chat_histories[user_id] = updated_history  # Store updated history
+
+        if analysis_result_dict.get("error"):
+            raise HTTPException(status_code=500, detail=analysis_result_dict["error"])
+
+        # --- New: Actually update the doc ---
+        rewritten_content = analysis_result_dict.get("analysis")
+        if target_name and rewritten_content:
+            from services.google_service import find_doc_id_by_name, update_google_doc
+            doc_id = await find_doc_id_by_name(target_name, creds)
+            if doc_id:
+                success = await update_google_doc(doc_id, rewritten_content, creds)
+                if success:
                     return {
                         "success": True,
-                        "message": analysis_result_dict.get("analysis", "Analysis complete."),
+                        "message": f"✅ Document '{target_name}' has been updated successfully.",
                         "type": "analysis_result"
                     }
-            
-            # --- Handle Unrecognized Action or Fallback --- 
-            elif parsed.get("error"):
-                raise HTTPException(status_code=400, detail=parsed.get("error"))
-            else:
-                print(f"Unrecognized action parsed: {action}. Falling back to general response.")
-                try:
-                    # Load chat history
-                    current_history = chat_histories.get(user_id, [])
-                    
-                    # Call Gemini directly
-                    response_content = await generate_gemini_response(
-                        user_message,
-                        chat_history=current_history # Pass history
-                    )
-                    
-                    # Unpack response and updated history
-                    response_text, updated_history = response_content 
-                    chat_histories[user_id] = updated_history # Store updated history
-                    
-                    # Return the text response directly
+                else:
                     return {
-                        "success": True,
-                        "message": response_text,
-                        "type": "fallback_message"
+                        "success": False,
+                        "message": f"⚠️ Couldn't update the document '{target_name}'.",
+                        "type": "analysis_result"
                     }
-                except Exception as e: 
-                    print(f"Error generating fallback response: {e}")
-                    raise HTTPException(status_code=500, detail="Sorry, I encountered an error trying to respond.")
+            else:
+                return {
+                    "success": False,
+                    "message": f"❌ Couldn't find the document '{target_name}' in your Drive.",
+                    "type": "analysis_result"
+                }
+        else:
+            return {
+                "success": True,
+                "message": rewritten_content or "Analysis complete.",
+                "type": "analysis_result"
+            }
 
-    except HTTPException as http_exc:
-        raise http_exc
-    except Exception as e:
-        print(f"An unexpected error occurred in handle_user_query for user {user_id[:10]}: {e}")
-        traceback.print_exc() # Print detailed traceback for debugging
-        if user_id in pending_requests:
-            del pending_requests[user_id]
-        raise HTTPException(status_code=500, detail="An unexpected internal error occurred.")
+            
+    elif parsed.get("error"):
+        raise HTTPException(status_code=400, detail=parsed.get("error"))
+    else:
+        print(f"Unrecognized action parsed: {action}. Falling back to general response.")
+        try:
+            drive_index = load_index(user_id) or []
+            current_history = chat_histories.get(user_id, [])
+
+            if drive_index:
+                index_prompt_lines = [f"- {item['name']} ({'Folder' if item.get('mimeType') == 'application/vnd.google-apps.folder' else 'File'}, id:{item['id']})" for item in drive_index[:200]]
+                formatted_index = "\n".join(index_prompt_lines)
+                drive_context = f"\nUser's Google Drive Contents (partial list):\n{formatted_index}\n---"
+            else:
+                drive_context = "\nUser's Google Drive Contents: (Could not load or is empty)"
+            
+            print(f"[Debug] Drive context length: {len(drive_context)} chars for fallback")
+            response_content = await generate_gemini_response(
+                user_message, 
+                drive_context=drive_context,
+                chat_history=current_history
+            )
+            
+            response_text, updated_history = response_content 
+            chat_histories[user_id] = updated_history
+            
+            return {
+                "success": True,
+                "message": response_text,
+                "type": "fallback_message"
+            }
+                
+        except Exception as e: 
+            print(f"Error generating fallback response: {e}")
+            raise HTTPException(status_code=500, detail="Sorry, I encountered an error trying to respond.")
