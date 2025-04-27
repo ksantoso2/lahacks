@@ -6,6 +6,7 @@ from googleapiclient.http import MediaIoBaseDownload
 import io
 import asyncio
 import datetime
+import re
 
 # --- LangChain Imports ---
 from langchain_core.prompts import ChatPromptTemplate
@@ -14,6 +15,20 @@ from langchain_core.output_parsers import StrOutputParser
 # Use direct imports assuming main.py is run from the backend2.0 directory
 from langchain_google_doc.llms import gemini_llm # Correct variable name
 from langchain_google_doc.prompts import content_generation_template
+
+def sanitize_content(text: str) -> str:
+    """
+    Cleans the content by:
+    - Removing markdown formatting (*, **, _, ~, #)
+    - Replacing bullet points (•) with hyphens (-)
+    """
+    text = re.sub(r'^(#{1,6})\s*', '', text, flags=re.MULTILINE)
+    text = re.sub(r'(\*\*|\*|__|_|~~)', '', text)
+    text = re.sub(r'^\s*•\s+', '- ', text, flags=re.MULTILINE)
+    text = re.sub(r'^>\s*', '', text, flags=re.MULTILINE)
+    text = re.sub(r'`([^`]*)`', r'\1', text)
+    text = re.sub(r'^-{3,}$', '', text, flags=re.MULTILINE)
+    return text.strip()
 
 async def list_all_drive_items(creds: Credentials) -> list[dict]:
     """Return every file & folder’s id, name, mimeType, parents, modifiedTime."""
@@ -128,10 +143,11 @@ async def run_langchain_doc_creation(original_request: str, generated_title: str
 
         # 3. Call the modified create_google_doc with title and the generated content
         print(f"Creating Google Doc '{generated_title}' using LangChain flow...")
+        cleaned_content = sanitize_content(generated_content)
         doc_id, doc_url = await create_google_doc(
             title=generated_title,
             creds=creds,
-            content=generated_content # Pass the full content here
+            content=cleaned_content # Pass the full content here
         )
 
         return doc_id, doc_url
