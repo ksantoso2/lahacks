@@ -4,6 +4,8 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload
 import io
+import asyncio
+import datetime
 
 # --- LangChain Imports ---
 from langchain_core.prompts import ChatPromptTemplate
@@ -13,6 +15,49 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_google_doc.llms import gemini_llm # Correct variable name
 from langchain_google_doc.prompts import content_generation_template
 
+async def list_all_drive_items(access_token: str) -> list[dict]:
+    """Return every file & folder’s id, name, mimeType, parents, modifiedTime."""
+    creds = Credentials(token=access_token)
+    service = build("drive", "v3", credentials=creds)
+    items, page_token = [], None
+    while True:
+        resp = service.files().list(
+            q="trashed=false",
+            fields="nextPageToken, files(id,name,mimeType,parents,modifiedTime)",
+            pageSize=1000,
+            pageToken=page_token,
+        ).execute()
+        items.extend(resp.get("files", []))
+        page_token = resp.get("nextPageToken")
+        if not page_token:
+            break
+    return items
+from .drive_cache import load_index, save_index
+
+async def ensure_drive_index(user_id: str, access_token: str) -> list[dict]:
+    """If no cache or >24 h old, (re)build the index.
+    Uses dummy updated_at for now until implemented in drive_cache.
+    """
+    # TODO: Implement updated_at in drive_cache.py
+    # For now, assume we always check if index exists and rebuild if not or force rebuild
+    # last_updated = updated_at(user_id) # Get actual update time when implemented
+
+    needs_update = False
+    current_index = load_index(user_id)
+    if not current_index: # Always update if no cache
+        needs_update = True
+    # elif last_updated and (datetime.datetime.utcnow() - last_updated).total_seconds() > 86400: # Update if older than 24h
+    #     needs_update = True
+
+    if needs_update:
+        print(f"Updating Drive index cache for user {user_id}...")
+        index = await list_all_drive_items(access_token)
+        save_index(user_id, index)
+        print(f"Saved updated Drive index for user {user_id}.")
+        return index
+    else:
+        print(f"Using existing Drive index cache for user {user_id}.")
+        return current_index
 
 async def create_google_doc(title: str, access_token: str, content: str | None = None):
     """

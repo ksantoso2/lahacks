@@ -76,20 +76,27 @@ async def generate_doc_preview(file_name: str) -> str:
         print(f"Gemini preview error: {e}")
         return "Failed to generate preview."
     
-async def generate_gemini_response(prompt: str) -> str:
+async def generate_gemini_response(prompt: str, drive_context: str | None = None) -> str:
+    """Generates a response using Gemini, optionally prepending Drive context."""
     try:
+        full_prompt = prompt
+        if drive_context:
+            # Prepend the drive context to the user's actual prompt
+            full_prompt = f"{drive_context}\n\nUser Question: {prompt}"
+            print(f"[Debug] Using Drive context for Gemini generation.")
+        else:
+            print(f"[Debug] No Drive context provided for Gemini generation.")
+
         # Custom prompt specific to this function
         model = genai.GenerativeModel(
             GEMINI_MODEL_NAME,
-            system_instruction="You are a response generator for any queries."
+            system_instruction="You are a helpful Google Drive assistant. Use the provided context about the user's Drive files if available."
         )
-        response = await model.generate_content_async(prompt)
+        response = await model.generate_content_async(full_prompt) # Use the combined prompt
         return response.text
     except Exception as e:
+        print(f"Error generating Gemini response: {e}")
         return "⚠️ Gemini failed to generate a response."
-
-        print(f"Error during Gemini parsing call: {e}")
-        return {"error": f"Failed to parse user message: {e}"}
 
 # Example usage (for testing):
 # if __name__ == "__main__":
