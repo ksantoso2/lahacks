@@ -1,3 +1,4 @@
+from services import drive_cache
 import os
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
@@ -84,6 +85,100 @@ async def list_all_drive_items(creds: Credentials) -> list[dict]:
     return items
 from .drive_cache import load_index, save_index
 
+# --- Google Drive Folder MIME ---
+FOLDER_MIME = "application/vnd.google-apps.folder"
+
+# --- Drive Item URL Generation ---
+
+def get_google_drive_url(item: dict) -> str:
+    """Generates the web URL for a Google Drive file or folder."""
+    item_id = item.get("id")
+    mime_type = item.get("mimeType")
+
+    if not item_id:
+        return "" # Cannot generate URL without ID
+
+    if mime_type == "application/vnd.google-apps.folder":
+        return f"https://drive.google.com/drive/folders/{item_id}"
+    elif mime_type == "application/vnd.google-apps.document":
+        return f"https://docs.google.com/document/d/{item_id}/edit"
+    elif mime_type == "application/vnd.google-apps.spreadsheet":
+        return f"https://docs.google.com/spreadsheets/d/{item_id}/edit"
+    elif mime_type == "application/vnd.google-apps.presentation":
+        return f"https://docs.google.com/presentation/d/{item_id}/edit"
+    # Add more specific types if needed (e.g., forms, drawings)
+    else:
+        # Default link for other file types viewable in Drive
+        return f"https://drive.google.com/file/d/{item_id}/view"
+
+# --- Find Item by Name (using cache) ---
+def find_item_by_name(item_name: str, user_id: str) -> dict | None:
+    """Searches the cached drive index for an item by exact name."""
+    drive_index = load_index(user_id)
+    if not drive_index:
+        print(f"Warning: Drive index cache not found or empty for user {user_id} during search.")
+        return None
+    
+    for item in drive_index:
+        if item.get('name') == item_name:
+            print(f"Found item '{item_name}' with ID {item.get('id')}")
+            return item # Return the first match
+            
+    print(f"Item '{item_name}' not found in cache for user {user_id}.")
+    return None
+
+# ------------------------------------------------------------
+# Breadth-First Crawl to Build Complete Drive Index WITH Paths
+# ------------------------------------------------------------
+async def crawl_drive_tree(creds: Credentials) -> list[dict]:
+    """Breadth-first traversal of *all* non-trashed files & folders.
+
+    Each returned item includes a `path` key representing its
+    human-readable location (e.g.  "Work/Specs/DocA").
+
+    Notes:
+    • We start at the implicit root folder ID "root".
+    • We request `supportsAllDrives=True` + `includeItemsFromAllDrives=True`
+      so shared drives and shortcuts are included when permissions allow.
+    • API quota: one `files.list` per folder.  Typical personal Drives have
+      < a few thousand folders, well under quota limits.
+    """
+    service = build("drive", "v3", credentials=creds)
+
+    items: list[dict] = []          # Flat list of every file/folder
+    queue: list[tuple[str, str]] = [("root", "")]  # (folder_id, current_path)
+
+    while queue:
+        folder_id, current_path = queue.pop(0)
+
+        page_token = None
+        while True:
+            resp = service.files().list(
+                q=f"'{folder_id}' in parents and trashed = false",
+                fields="nextPageToken, files(id,name,mimeType,parents,modifiedTime)",
+                pageSize=1000,
+                pageToken=page_token,
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True,
+                corpora="user",
+            ).execute()
+
+            for f in resp.get("files", []):
+                # Build path: root-level children have no leading slash
+                path = f"{current_path}/{f['name']}" if current_path else f["name"]
+                f["path"] = path
+                items.append(f)
+
+                # If folder, enqueue for further traversal
+                if f.get("mimeType") == FOLDER_MIME:
+                    queue.append((f["id"], path))
+
+            page_token = resp.get("nextPageToken")
+            if not page_token:
+                break
+
+    return items
+
 async def ensure_drive_index(user_id: str, creds: Credentials) -> list[dict]:
     """If no cache or >24 h old, (re)build the index.
     Passes Credentials object to list_all_drive_items.
@@ -96,8 +191,14 @@ async def ensure_drive_index(user_id: str, creds: Credentials) -> list[dict]:
     #     needs_update = True
 
     if needs_update:
-        print(f"Updating Drive index cache for user {user_id}...")
-        index = await list_all_drive_items(creds)
+        cache_file = drive_cache.cache_path(user_id)
+        try:
+            cache_file.unlink(missing_ok=True) # Delete file if it exists, ignore if not
+            print(f"Removed old cache file for user {user_id} before refresh.")
+        except OSError as e:
+            print(f"Error removing old cache file for {user_id}: {e}")
+        print(f"Updating Drive index cache for user {user_id} (full BFS)...")
+        index = await crawl_drive_tree(creds)
         save_index(user_id, index)
         print(f"Saved updated Drive index for user {user_id}.")
         return index
@@ -195,69 +296,48 @@ async def run_langchain_doc_creation(original_request: str, generated_title: str
         traceback.print_exc() # Print detailed traceback
         return None, None # Indicate failure
 
-async def move_doc_to_folder(doc_name: str, source_folder: str, target_folder: str, creds: Credentials) -> str:
-    """
-    Moves a document (by name) from source_folder to target_folder.
-    Returns a status message.
-    """
-    service = build('drive', 'v3', credentials=creds)
+async def move_doc_to_folder(file_id: str, current_parent_id: str, target_folder_id: str, creds: Credentials, doc_name: str = "Unknown File") -> str:
+    """Moves a Google Drive file to a specified target folder using IDs.
 
+    Args:
+        file_id: The ID of the file to move.
+        current_parent_id: The ID of the file's current parent folder.
+        target_folder_id: The ID of the target folder.
+        creds: Google OAuth2 credentials.
+        doc_name: The name of the document (for logging/messages).
+
+    Returns:
+        A status message indicating success or failure.
+    """
     try:
-        # Search for the document by name
-        doc_results = service.files().list(
-            q=f"name = '{doc_name}' and trashed = false",
-            fields="files(id, name, parents)",
-            pageSize=1
-        ).execute()
-        if not doc_results['files']:
-            return f"❌ Document '{doc_name}' not found."
+        drive_service = build('drive', 'v3', credentials=creds)
+        print(f"Attempting to move file '{doc_name}' (ID: {file_id}) from parent {current_parent_id} to target {target_folder_id}")
 
-        doc = doc_results['files'][0]
-        doc_id = doc['id']
-        current_parents = ",".join(doc.get('parents', []))
-
-        # Search for the target folder
-        # --- List all folders ---
-        folder_results = service.files().list(
-            q="mimeType = 'application/vnd.google-apps.folder'",
-            fields="files(id, name)",
-            pageSize=1000,
-            corpora="user",
-            supportsAllDrives=True,
-            includeItemsFromAllDrives=True
-        ).execute()
-        #print(f"Raw API folder response: {folder_results}")
-
-        # --- Log all found folders ---
-        print(f"Found folders: {[f['name'] for f in folder_results['files']]}")
-
-        # --- Search manually (case-insensitive) ---
-        target_folder_match = next(
-            (f for f in folder_results['files'] if f['name'].lower() == target_folder.lower()),
-            None
-        )
-
-        if not target_folder_match:
-            return f"❌ Target folder '{target_folder}' not found."
-
-        target_folder_id = target_folder_match['id']
-        print(f"Matched target folder ID: {target_folder_id}")
-
-
-        # Perform the move
-        service.files().update(
-            fileId=doc_id,
+        # Move the file by updating its parents field
+        # We need to remove the old parent and add the new one.
+        file_metadata = drive_service.files().update(
+            fileId=file_id,
             addParents=target_folder_id,
-            removeParents=current_parents,
-            fields='id, parents'
+            removeParents=current_parent_id,
+            fields='id, parents' # Request necessary fields
         ).execute()
 
-        return f"✅ Moved '{doc_name}' to '{target_folder}'."
+        print(f"Successfully moved '{doc_name}' (ID: {file_id}) to folder ID {target_folder_id}. New parents: {file_metadata.get('parents')}")
+        return f"✅ Successfully moved '{doc_name}' to the target folder."
 
     except HttpError as error:
-        print(f"An API error occurred: {error}")
-        return f"❌ Failed to move '{doc_name}': {error._get_reason()}"
-
+        print(f"An API error occurred while moving '{doc_name}': {error}")
+        # Provide more specific error messages based on common issues
+        reason = error._get_reason()
+        if error.resp.status == 404:
+            return f"❌ Failed to move '{doc_name}': File or one of the folders not found. Please check the names/IDs."
+        elif error.resp.status == 403:
+             return f"❌ Failed to move '{doc_name}': Permission denied. Check if you have edit access to the file and the target folder."
+        else:
+            return f"❌ Failed to move '{doc_name}': {reason}"
+    except Exception as e:
+        print(f"An unexpected error occurred while moving '{doc_name}': {e}")
+        return f"❌ An unexpected error occurred while trying to move '{doc_name}'."
 
 async def get_drive_item_content(target_name: str, creds: Credentials) -> str | None:
     """

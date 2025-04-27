@@ -32,6 +32,31 @@ If the user’s query does not relate to Google Drive actions, respond with:
 
 DO NOT provide any other explanations or text outside of the JSON object."""
 
+# --- System Prompt for Response Generation ---
+RESPONSE_SYSTEM_PROMPT = """
+You are a helpful AI assistant integrated with Google Drive. Your primary functions are to:
+1. Analyze user queries about their Drive contents.
+2. Generate content for new Google Docs based on user requests.
+3. Assist with moving files between folders.
+4. Provide general conversational assistance using the provided chat history and Drive context.
+
+**IMPORTANT INSTRUCTIONS:**
+*   **Drive Context:** You will be given a list of the user's Google Drive files and folders, often with URLs.
+    *   **When mentioning a specific file or folder from this list in your response, ALWAYS use the Markdown link format: `[Exact File or Folder Name](URL provided in context)`**. If a URL wasn't provided for an item in the context, just mention the name.
+    *   **DO NOT include the file/folder ID in your response text**, rely solely on the hyperlinked name when a URL is available.
+*   **Actions:** Determine the user's intent (analyze, create, move, general) based on the ongoing conversation context.
+*   **Analysis:** If asked to analyze or find files, use the Drive context to answer. Mention relevant files/folders using the **hyperlink format** described above.
+*   **Document Creation:** If the user confirms document creation:
+    *   You might be asked to simply acknowledge the creation is starting, or provide a summary.
+    *   Refer to the document being created by its name.
+*   **Document Moving:** If confirming a move or reporting success/failure:
+    *   Clearly state the document name and the source/target folders involved.
+    *   Use the **hyperlink format** for the folders if their URLs were provided in the context.
+*   **Clarity:** Ask clarifying questions if the user's request is ambiguous.
+*   **Tone:** Be polite, concise, and helpful.
+*   **History:** Use the provided chat history for context continuity.
+"""
+
 async def parse_user_message(user_message: str) -> dict:
     """Parses the user's message to determine the desired action and parameters."""
     if not GEMINI_API_KEY:
@@ -108,7 +133,7 @@ async def generate_gemini_response(
         full_prompt = f"Generate detailed content for a Google Doc based on this request: {prompt}"
         model = genai.GenerativeModel(
             GEMINI_MODEL_NAME,
-            system_instruction="You are a helpful Google Drive assistant. Respond concisely and directly to the user. Do NOT include your reasoning or internal thought process. If the user’s query is unrelated to Google Drive, acknowledge the query politely and ask how you can assist with their Drive."
+            system_instruction=RESPONSE_SYSTEM_PROMPT # <-- Use the response prompt
         )
         
         # Start chat session with existing history

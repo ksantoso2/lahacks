@@ -7,3 +7,4 @@ __pycache__/
 *$py.class
 langchain_secrets.json
 token.json
+drive_cache/

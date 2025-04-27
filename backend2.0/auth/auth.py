@@ -189,11 +189,12 @@ async def oauth2callback(request: Request):
     if login_creds.expiry and isinstance(login_creds.expiry, str):
         login_creds.expiry = datetime.fromisoformat(login_creds.expiry)
 
-    await ensure_drive_index(user_id, login_creds)  # Pass Credentials object
+    # await ensure_drive_index(user_id, login_creds)  # Pass Credentials object
 
     # 🚀 Build redirect URL for frontend (no longer sending tokens in fragment)
     params = {
-        "login_success": "true"  # Indicate successful login via session
+        "login_success": "true",
+    "cache_status": "pending"  # Indicate successful login via session
     }
     redirect_url = f"{FRONTEND_URL}#{urllib.parse.urlencode(params)}"
     print(f"🚀 Redirecting frontend to: {redirect_url}")

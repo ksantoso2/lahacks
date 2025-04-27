@@ -1,4 +1,5 @@
 import os
+from routers import status_router # Add this line
 import uvicorn
 from fastapi import FastAPI, Depends, Request, HTTPException
 from dotenv import load_dotenv
@@ -42,7 +43,7 @@ app.add_middleware(
 # --- Include Routers ---
 app.include_router(auth_router, prefix="/auth", tags=["auth"])
 app.include_router(action_router.router, prefix="/api", tags=["actions"]) # Corrected: Access the 'router' attribute
-
+app.include_router(status_router.router) # Add this line
 # --- Root endpoint ---
 @app.get("/")
 async def root():

@@ -8,6 +8,7 @@ function ChatInterface({ backendUrl }) {
   const [messages, setMessages] = useState([
     { id: Date.now(), sender: 'agent', text: 'Hello! How can I help you with your Google Drive files today?' },
   ]);
+  
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false); // State for loading indicator
   const [confirmationPendingMsgId, setConfirmationPendingMsgId] = useState(null); // Track which message needs confirmation
@@ -37,17 +38,14 @@ function ChatInterface({ backendUrl }) {
     setInputValue(event.target.value);
   };
 
-  const sendMessage = async (text, confirmation = null, regenerate = false) => {
-    // Prevent sending empty messages unless it's a confirmation response
-    const messageText = text.trim();
-    if (!messageText && confirmation === null && regenerate === false) return;
+  const sendMessage = async (payload) => {
+    const messageToSend = payload?.message ?? inputValue; // Use payload message if provided, else use input
+    const confirmationToSend = payload?.confirmation; // Use payload confirmation if provided
+    const regenerateToSend = payload?.regenerate;     // Use payload regenerate if provided
 
-    // Add user message to state immediately
-    // Only add user message if it's not just a confirmation click
-    if (messageText) {
-      setMessages((prev) => [...prev, { id: Date.now(), sender: 'user', text: messageText }]);
-    }
-    setInputValue(''); // Clear input field
+    // Don't send empty messages unless it's a confirmation/action click
+    if (!messageToSend && confirmationToSend === undefined && regenerateToSend === undefined) return;
+
     setIsLoading(true); // Show loading indicator
     setConfirmationPendingMsgId(null); // Clear pending confirmation when sending new message or confirmation
     setConfirmationType(null);
@@ -55,16 +53,11 @@ function ChatInterface({ backendUrl }) {
 
     try {
       // Construct payload, including confirmation or regenerate flag
-      const payload = { message: messageText };
-      if (confirmation !== null) {
-        payload.confirmation = confirmation;
-      }
-      // Add regenerate flag if true
-      if (regenerate === true) {
-        payload.regenerate = true;
-      }
-
-      const response = await axios.post(`${backendUrl}/api/ask`, payload, {
+      const response = await axios.post(`${backendUrl}/api/ask`, {
+        message: messageToSend, 
+        confirmation: confirmationToSend, // Send the confirmation value
+        regenerate: regenerateToSend,     // Send regenerate flag
+      }, {
         withCredentials: true, // Send cookies with the request
       });
 
@@ -97,8 +90,24 @@ function ChatInterface({ backendUrl }) {
   const handleKeyDown = (event) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault(); // Prevent newline on Enter
-      sendMessage(inputValue);
+      sendMessage({ message: inputValue });
     }
+  };
+
+  const handleConfirmation = async (choice) => {
+    if (!confirmationPendingMsgId) return;
+
+    const payload = {
+      confirmation: choice,
+    };
+
+    // Send the confirmation choice
+    await sendMessage(payload);
+
+    // Clear confirmation state after sending
+    setConfirmationPendingMsgId(null);
+    setConfirmationType(null);
+    setAllowRegenerate(false);
   };
 
   return (
@@ -122,20 +131,28 @@ function ChatInterface({ backendUrl }) {
                 {/* Buttons for Preview Generation Confirmation */} 
                 {confirmationType === 'preview_gen' && (
                   <>
-                    <button onClick={() => sendMessage('', true)} className={stylesModule.confirmButtonYes}>Yes, Generate Preview</button>
-                    <button onClick={() => sendMessage('', false)} className={stylesModule.confirmButtonNo}>No, Cancel</button>
+                    <button onClick={() => handleConfirmation(true)} className={stylesModule.confirmButtonYes}>Yes, Generate Preview</button>
+                    <button onClick={() => handleConfirmation(false)} className={stylesModule.confirmButtonNo}>No, Cancel</button>
                   </>
                 )}
                 
                 {/* Buttons for Document Creation Confirmation */} 
                 {confirmationType === 'doc_create' && (
                   <>
-                    <button onClick={() => sendMessage('', true)} className={stylesModule.confirmButtonYes}>Yes, Create</button>
-                    <button onClick={() => sendMessage('', false)} className={stylesModule.confirmButtonNo}>No, Cancel</button>
+                    <button onClick={() => handleConfirmation(true)} className={stylesModule.confirmButtonYes}>Yes, Create</button>
+                    <button onClick={() => handleConfirmation(false)} className={stylesModule.confirmButtonNo}>No, Cancel</button>
                     {/* Show Regenerate button only if allowed */} 
                     {allowRegenerate && (
-                      <button onClick={() => sendMessage('', null, true)} className={stylesModule.confirmButtonRegen}>Regenerate Preview</button>
+                      <button onClick={() => sendMessage({ regenerate: true })} className={stylesModule.confirmButtonRegen}>Regenerate Preview</button>
                     )}
+                  </>
+                )}
+                
+                {/* Buttons for Move Document Confirmation */} 
+                {confirmationType === 'moveDoc' && (
+                  <>
+                    <button onClick={() => handleConfirmation(true)} className={stylesModule.confirmButtonYes}>Yes</button>
+                    <button onClick={() => handleConfirmation(false)} className={stylesModule.confirmButtonNo}>No</button>
                   </>
                 )}
               </div>
@@ -157,7 +174,7 @@ function ChatInterface({ backendUrl }) {
         <button
           // Combine base class with disabled class conditionally
           className={`${stylesModule.sendButton} ${isLoading ? stylesModule.sendButtonDisabled : ''}`}
-          onClick={() => sendMessage(inputValue)}
+          onClick={() => sendMessage({ message: inputValue })}
           disabled={isLoading}
         >
           {isLoading ? '...' : 'Send'}
