@@ -16,6 +16,30 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_google_doc.llms import gemini_llm # Correct variable name
 from langchain_google_doc.prompts import content_generation_template
 
+async def find_doc_id_by_name(doc_name: str, creds: Credentials) -> str | None:
+    """
+    Finds the Google Doc ID by its name (case-insensitive).
+    """
+    service = build('drive', 'v3', credentials=creds)
+    try:
+        results = service.files().list(
+            q=f"mimeType='application/vnd.google-apps.document' and trashed=false",
+            spaces='drive',
+            fields='files(id, name)',
+            pageSize=1000
+        ).execute()
+
+        items = results.get('files', [])
+        for item in items:
+            if item['name'].lower() == doc_name.lower():
+                return item['id']
+        
+        return None  # Not found
+    except Exception as e:
+        print(f"Error finding doc ID by name: {e}")
+        return None
+
+
 def sanitize_content(text: str) -> str:
     """
     Cleans the content by:
@@ -380,3 +404,45 @@ async def get_drive_item_content(target_name: str, creds: Credentials) -> str | 
          print(f"An unexpected error occurred in get_drive_item_content: {e}")
          # Propagate or handle? For now, return an error message
          return f"An unexpected error occurred while fetching content: {e}"
+
+async def update_google_doc(doc_id: str, new_content: str, creds: Credentials):
+    """
+    Replaces the content of an existing Google Doc with new content.
+    """
+    service = build('docs', 'v1', credentials=creds)
+
+    try:
+        print(f"Clearing and updating doc {doc_id}...")
+
+        # --- First, get the real end index of the doc ---
+        document = service.documents().get(documentId=doc_id).execute()
+        end_index = document.get('body', {}).get('content', [])[-1].get('endIndex', 1)
+        print(f"Real document end index: {end_index}")
+
+        # Now safely delete from index 1 to real end index
+        requests = [
+            {
+                "deleteContentRange": {
+                    "range": {
+                        "startIndex": 1,  # After the title usually
+                        "endIndex": end_index - 1  # Careful: endIndex is exclusive
+                    }
+                }
+            },
+            {
+                "insertText": {
+                    "location": {"index": 1},
+                    "text": "\n\n" + new_content
+                }
+            }
+        ]
+        service.documents().batchUpdate(
+            documentId=doc_id,
+            body={"requests": requests}
+        ).execute()
+
+        print(f"✅ Document {doc_id} updated successfully.")
+        return True
+    except Exception as e:
+        print(f"Error updating document: {e}")
+        return False

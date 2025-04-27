@@ -138,6 +138,15 @@ function ChatInterface({ backendUrl }) {
                     )}
                   </>
                 )}
+
+                {/* Buttons for Document Edit Confirmation */}
+                {confirmationType === 'edit_doc' && (
+                  <>
+                    <button onClick={() => sendMessage('', true)} className={stylesModule.confirmButtonYes}>Yes, Apply Changes</button>
+                    <button onClick={() => sendMessage('', false)} className={stylesModule.confirmButtonNo}>No, Cancel</button>
+                  </>
+                )}
+
               </div>
             )}
           </div>
