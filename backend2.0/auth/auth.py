@@ -16,9 +16,6 @@ from datetime import datetime
 router = APIRouter()
 
 # --- Config ---
-CLIENT_SECRETS_FILE = "client_secret.json"
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173/")
-
 SCOPES = [
     "openid",
     "https://www.googleapis.com/auth/userinfo.email",
@@ -28,8 +25,11 @@ SCOPES = [
     "https://www.googleapis.com/auth/documents",
 ]
 
+# Ensure these are loaded, e.g., via dotenv in main.py or system env vars
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
-REDIRECT_URI = os.getenv("REDIRECT_URI")  # Must match exactly in Google Console!
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
+GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173/")
 
 # --- Token Verification (Session Based) ---
 async def verify_google_token(request: Request) -> tuple[str, Credentials]:
@@ -83,13 +83,24 @@ async def verify_google_token(request: Request) -> tuple[str, Credentials]:
 # --- Start OAuth2 Login ---
 @router.get("/local-login")
 async def local_login(request: Request):
-    if not GOOGLE_CLIENT_ID or not REDIRECT_URI:
-        raise HTTPException(status_code=500, detail="Google Client ID or Redirect URI not configured.")
+    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET or not GOOGLE_REDIRECT_URI:
+        raise HTTPException(status_code=500, detail="Server OAuth configuration is missing. Check environment variables.")
 
-    flow = Flow.from_client_secrets_file(
-        CLIENT_SECRETS_FILE,
+    client_config = {
+        "web": {
+            "client_id": GOOGLE_CLIENT_ID,
+            "client_secret": GOOGLE_CLIENT_SECRET,
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+            "redirect_uris": [GOOGLE_REDIRECT_URI],
+        }
+    }
+
+    flow = Flow.from_client_config(
+        client_config=client_config,
         scopes=SCOPES,
-        redirect_uri=REDIRECT_URI,
+        redirect_uri=GOOGLE_REDIRECT_URI,
     )
 
     # Force using v2 endpoint
@@ -110,17 +121,28 @@ async def local_login(request: Request):
 @router.get("/oauth2callback")
 async def oauth2callback(request: Request):
     """Handles the redirect from Google after user authentication."""
-    if not GOOGLE_CLIENT_ID or not REDIRECT_URI:
-        raise HTTPException(status_code=500, detail="Google Client ID or Redirect URI not configured.")
+    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET or not GOOGLE_REDIRECT_URI:
+        raise HTTPException(status_code=500, detail="Server OAuth configuration is missing. Check environment variables.")
 
     code = request.query_params.get("code")
     if not code:
         raise HTTPException(status_code=400, detail="Missing code in OAuth callback.")
 
-    flow = Flow.from_client_secrets_file(
-        CLIENT_SECRETS_FILE,
+    client_config = {
+        "web": {
+            "client_id": GOOGLE_CLIENT_ID,
+            "client_secret": GOOGLE_CLIENT_SECRET,
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+            "redirect_uris": [GOOGLE_REDIRECT_URI],
+        }
+    }
+
+    flow = Flow.from_client_config(
+        client_config=client_config,
         scopes=SCOPES,
-        redirect_uri=REDIRECT_URI,
+        redirect_uri=GOOGLE_REDIRECT_URI,
     )
 
     try:
@@ -194,7 +216,7 @@ async def oauth2callback(request: Request):
     # 🚀 Build redirect URL for frontend (no longer sending tokens in fragment)
     params = {
         "login_success": "true",
-    "cache_status": "pending"  # Indicate successful login via session
+        "cache_status": "pending"  # Indicate successful login via session
     }
     redirect_url = f"{FRONTEND_URL}#{urllib.parse.urlencode(params)}"
     print(f"🚀 Redirecting frontend to: {redirect_url}")

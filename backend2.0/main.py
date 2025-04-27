@@ -1,18 +1,18 @@
 import os
-from routers import status_router # Add this line
+from dotenv import load_dotenv
+load_dotenv()
+
 import uvicorn
 from fastapi import FastAPI, Depends, Request, HTTPException
-from dotenv import load_dotenv
 from fastapi.middleware.cors import CORSMiddleware
 from google.oauth2.credentials import Credentials
 from starlette.middleware.sessions import SessionMiddleware
 from routers import action_router 
+from routers import status_router # Add this line
 from auth.auth import router as auth_router, verify_google_token
 from services.drive_cache import load_index
 from services.google_service import list_all_drive_items, ensure_drive_index
 import json
-
-load_dotenv()
 
 # --- App Setup ---
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'  # Allow OAuth over HTTP for local dev

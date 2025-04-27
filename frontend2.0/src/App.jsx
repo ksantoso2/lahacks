@@ -10,7 +10,8 @@ function App() {
   const [authError, setAuthError] = useState(null); // General auth error state
   const [isLoggedIn, setIsLoggedIn] = useState(false); // Track login status
 
-  const backendUrl = 'http://localhost:8000'; // Your backend URL
+  // Read backend URL from environment variable (Vite exposes VITE_ prefixed vars)
+  const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'; // Fallback for safety
 
   useEffect(() => {
     // Check session status on initial load

@@ -4,6 +4,8 @@ import os.path
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
+import os
+from dotenv import load_dotenv
 
 from .doc_gen_chain import run_generation_with_hitl
 
@@ -12,9 +14,6 @@ from .doc_gen_chain import run_generation_with_hitl
 SCOPES = ['https://www.googleapis.com/auth/drive'] # Or ['https://www.googleapis.com/auth/documents']
 # Path to store the user's access and refresh tokens.
 TOKEN_PATH = 'token.json' # Stores token in the directory where the script is run (backend2.0)
-# Path to your client secrets file.
-# Assumes client_secret.json is in the same directory where the script is run (backend2.0)
-CLIENT_SECRETS_PATH = 'client_secret.json'
 
 async def get_google_credentials():
     """Gets valid Google credentials, handling the OAuth flow if necessary."""
@@ -26,25 +25,35 @@ async def get_google_credentials():
         creds = Credentials.from_authorized_user_file(TOKEN_PATH, SCOPES)
     # If there are no (valid) credentials available, let the user log in.
     if not creds or not creds.valid:
+        # Load env vars - needed if script is run standalone
+        load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', '.env')) # Load from backend2.0/.env
+        client_id = os.getenv('GOOGLE_CLIENT_ID')
+        client_secret = os.getenv('GOOGLE_CLIENT_SECRET')
+
+        if not client_id or not client_secret:
+            raise ValueError("Missing GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET in environment variables/.env file.")
+
+        client_config = {
+            "installed": { # Use "installed" for scripts like this
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": "https://oauth2.googleapis.com/token",
+                # redirect_uris often use urn:ietf:wg:oauth:2.0:oob for installed apps if run_local_server isn't used
+            }
+        }
+
         if creds and creds.expired and creds.refresh_token:
             try:
-                print("Refreshing access token...")
+                print("Refreshing expired credentials...")
                 creds.refresh(Request())
             except Exception as e:
-                print(f"Error refreshing token: {e}. Need to re-authenticate.")
-                creds = None # Force re-authentication
-        if not creds: # Needs full authentication flow
-            if not os.path.exists(CLIENT_SECRETS_PATH):
-                raise FileNotFoundError(
-                    f"Client secrets file not found at: {os.path.abspath(CLIENT_SECRETS_PATH)}\
-"+
-                    "Please ensure 'client_secret.json' is in the backend2.0 directory."
-                )
-            print("Starting authentication flow...")
-            flow = InstalledAppFlow.from_client_secrets_file(
-                CLIENT_SECRETS_PATH, SCOPES)
-            # port=0 means it finds an available port automatically
-            # Let's use a fixed port (e.g., 8100) for easier redirect URI configuration
+                print(f"Failed to refresh token: {e}. Need to re-authenticate.")
+                creds = None # Force re-authentication if refresh fails
+        else:
+            flow = InstalledAppFlow.from_client_config(client_config, SCOPES)
+            # Recommended to run on a specific port (e.g., 8100) to avoid conflicts
+            # and ensure it matches a potential redirect URI in Google Console if needed.
             print("Starting local server for authentication on port 8100...")
             creds = flow.run_local_server(port=8100)
         # Save the credentials for the next run
@@ -67,11 +76,6 @@ async def get_google_credentials():
 async def main():
     parser = argparse.ArgumentParser(description="Generate and create a Google Doc using LangChain and Gemini.")
     parser.add_argument("topic", help="The topic for the Google Document.")
-    # parser.add_argument(
-    #     "--token",
-    #     required=True,
-    #     help="Your Google OAuth Access Token (required for creating the doc)."
-    # )
     args = parser.parse_args()
 
     print("Acquiring Google credentials...")
