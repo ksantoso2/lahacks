@@ -159,6 +159,69 @@ async def run_langchain_doc_creation(original_request: str, generated_title: str
         traceback.print_exc() # Print detailed traceback
         return None, None # Indicate failure
 
+async def move_doc_to_folder(doc_name: str, source_folder: str, target_folder: str, creds: Credentials) -> str:
+    """
+    Moves a document (by name) from source_folder to target_folder.
+    Returns a status message.
+    """
+    service = build('drive', 'v3', credentials=creds)
+
+    try:
+        # Search for the document by name
+        doc_results = service.files().list(
+            q=f"name = '{doc_name}' and trashed = false",
+            fields="files(id, name, parents)",
+            pageSize=1
+        ).execute()
+        if not doc_results['files']:
+            return f"❌ Document '{doc_name}' not found."
+
+        doc = doc_results['files'][0]
+        doc_id = doc['id']
+        current_parents = ",".join(doc.get('parents', []))
+
+        # Search for the target folder
+        # --- List all folders ---
+        folder_results = service.files().list(
+            q="mimeType = 'application/vnd.google-apps.folder'",
+            fields="files(id, name)",
+            pageSize=1000,
+            corpora="user",
+            supportsAllDrives=True,
+            includeItemsFromAllDrives=True
+        ).execute()
+        #print(f"Raw API folder response: {folder_results}")
+
+        # --- Log all found folders ---
+        print(f"Found folders: {[f['name'] for f in folder_results['files']]}")
+
+        # --- Search manually (case-insensitive) ---
+        target_folder_match = next(
+            (f for f in folder_results['files'] if f['name'].lower() == target_folder.lower()),
+            None
+        )
+
+        if not target_folder_match:
+            return f"❌ Target folder '{target_folder}' not found."
+
+        target_folder_id = target_folder_match['id']
+        print(f"Matched target folder ID: {target_folder_id}")
+
+
+        # Perform the move
+        service.files().update(
+            fileId=doc_id,
+            addParents=target_folder_id,
+            removeParents=current_parents,
+            fields='id, parents'
+        ).execute()
+
+        return f"✅ Moved '{doc_name}' to '{target_folder}'."
+
+    except HttpError as error:
+        print(f"An API error occurred: {error}")
+        return f"❌ Failed to move '{doc_name}': {error._get_reason()}"
+
 
 async def get_drive_item_content(target_name: str, creds: Credentials) -> str | None:
     """
