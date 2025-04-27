@@ -9,9 +9,9 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL_NAME = "models/gemini-2.0-flash"  # Use 2.0 flash for potentially better instruction following
 
 # --- Updated System Prompt ---
-SYSTEM_PROMPT = """You are an instruction parser for a Google Drive Assistant. Your goal is to understand if the user wants to 'createDoc' or 'analyze' something in their Drive. 
+SYSTEM_PROMPT = """You are an instruction parser for a Google Drive Assistant. Your goal is to understand if the user wants to 'createDoc' or 'analyze' something in their Drive.
 
-Analyze keywords include: summarize, analyse, explain, what is in, tell me about.
+Analyze keywords include: summarize, analyze, explain, what is in, tell me about.
 
 ONLY return a JSON object with 'action_to_perform'.
 
@@ -22,7 +22,10 @@ If the action is 'analyze', include the 'target' (the file/folder name if specif
 Example: {"action_to_perform": "analyze", "target": "Project Plan Doc", "query": "summarize the main points"}
 Example: {"action_to_perform": "analyze", "target": null, "query": "What is the capital of France?"} # Handle general queries
 
-DO NOT return any other text, explanations, or markdown formatting."""
+If the user’s query does not relate to Google Drive actions, respond with:
+{"action_to_perform": "none"}
+
+DO NOT provide any other explanations or text outside of the JSON object."""
 
 async def parse_user_message(user_message: str) -> dict:
     """Parses the user's message to determine the desired action and parameters."""
@@ -43,7 +46,6 @@ async def parse_user_message(user_message: str) -> dict:
         
         # Attempt to parse the JSON response
         raw_response = response.text
-        print(f"Raw Gemini parser response: {raw_response}")
         
         # Clean potential markdown ```json ... ``` artifacts
         if raw_response.strip().startswith("```json"):
@@ -64,11 +66,11 @@ async def parse_user_message(user_message: str) -> dict:
 
 async def generate_doc_preview(file_name: str) -> str:
     try:
-        prompt = f"Create a short preview for a Google Doc titled '{file_name}'."
+        prompt = f"Generate an informative preview for a Google Doc titled '{file_name}'. The preview should hint at the content of the document but DO NOT include introductory phrases like 'Here's a preview' or offer multiple options."
 
         model = genai.GenerativeModel(
             GEMINI_MODEL_NAME,
-            system_instruction="You are a content creator that generates document previews."
+            system_instruction="You are a content creator that generates an informative preview for a Google Doc based on its title. Do NOT include multiple options, explanations, or introductory lines. Only output the preview text directly."
         )
         response = await model.generate_content_async(prompt)
         return response.text.strip()
@@ -101,7 +103,7 @@ async def generate_gemini_response(
         full_prompt = f"Generate detailed content for a Google Doc based on this request: {prompt}"
         model = genai.GenerativeModel(
             GEMINI_MODEL_NAME,
-            system_instruction="You are a helpful Google Drive assistant. Use the provided context about the user's Drive files if available."
+            system_instruction="You are a helpful Google Drive assistant. Respond concisely and directly to the user. Do NOT include your reasoning or internal thought process. If the user’s query is unrelated to Google Drive, acknowledge the query politely and ask how you can assist with their Drive."
         )
         
         # Start chat session with existing history
