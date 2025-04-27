@@ -71,6 +71,77 @@ function App() {
     // Optionally redirect or clear state further
   };
 
+  // --- Core Send Message Logic --- 
+  const sendMessageLogic = async (message, confirmation = null, regenerate = false, skipPreview = false) => {
+    console.log(`Sending message: confirm=${confirmation}, regen=${regenerate}, skip=${skipPreview}`);
+    if (isLoading || !message.trim() && !confirmation && !regenerate && !skipPreview) return; // Allow sending flags without message text
+
+    setIsLoading(true);
+    // Optimistically add user message ONLY if it's an actual message, not just a button click
+    if (message && !confirmation && !regenerate && !skipPreview) {
+        const newUserMessage = { role: 'user', parts: [message] };
+        setMessages(prev => [...prev, newUserMessage]);
+    }
+    // Clear input immediately for user messages
+    // setInput(''); // Assuming setInput is managed by ChatInterface
+
+    // Clear confirmation buttons optimistically if a confirmation/regenerate/skip action is taken
+    if (confirmation !== null || regenerate || skipPreview) {
+      setActionRequired(null);
+      setPreviewDetails(null);
+    }
+
+    try {
+      const response = await axios.post(`${backendUrl}/api/ask`, 
+        { 
+            message: message, 
+            confirmation: confirmation,
+            regenerate: regenerate,
+            skip_preview: skipPreview
+        },
+        {
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        }
+      );
+
+      const data = response.data;
+      console.log("✅ Backend Response:", data);
+      const newModelMessage = { role: 'model', parts: [data.message] };
+      setMessages(prev => [...prev, newModelMessage]);
+
+      // Handle action required from backend
+      if (data.action_required === 'confirm_create') {
+        setActionRequired('confirm_create');
+        setPreviewDetails({ file_name: data.file_name, preview: data.preview });
+      } else {
+        // Ensure buttons are cleared if backend confirms action is done
+        setActionRequired(null);
+        setPreviewDetails(null);
+      }
+
+    } catch (error) {
+        console.error("❌ Error sending message:", error.response?.data?.detail || error.message);
+        const errorMessageText = `Error: ${error.response?.data?.detail || error.message}`;
+        const errorMessage = { role: 'model', parts: [errorMessageText] };
+        setMessages(prev => [...prev, errorMessage]);
+        // Clear any pending actions on error too?
+        setActionRequired(null);
+        setPreviewDetails(null);
+    } finally {
+        setIsLoading(false);
+    }
+  };
+
+  // --- Handler for Skip Button Click --- 
+  const handleSkipPreview = () => {
+    console.log("Triggering skip preview action...");
+    // Use the core logic, passing the skip flag
+    // Pass null message because this is just a button action
+    sendMessageLogic(null, null, false, true); 
+  };
+
   if (isLoadingAuth) {
     return <div>Checking authentication...</div>;
   }
@@ -88,7 +159,11 @@ function App() {
            <span>Logged In</span>
            <button onClick={handleLocalLogout} style={{ marginLeft: '10px' }}>Logout (Local)</button>
          </div>
-         <ChatInterface backendUrl={backendUrl} /> {/* Remove authToken prop */}
+         <ChatInterface 
+           backendUrl={backendUrl} 
+           handleSkipPreview={handleSkipPreview} // Pass the function defined above
+           sendMessage={sendMessageLogic} // Pass the function defined above
+         /> {/* Remove authToken prop */}
         </>
       ) : (
         <div style={{ textAlign: 'center', marginTop: '50px' }}>
