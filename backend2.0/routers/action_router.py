@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from auth.auth import verify_google_token
+from google.oauth2.credentials import Credentials
 
 from services.gemini_service import parse_user_message, generate_doc_preview, generate_gemini_response
 from services.google_service import get_drive_item_content, run_langchain_doc_creation
@@ -15,14 +16,18 @@ router = APIRouter()
 # States: 'confirm_preview_gen', 'confirm_create'
 pending_requests = {} 
 
+# --- Chat History Storage ---
+# Structure: {user_id: [{'role': 'user'/'model', 'parts': ['message content']}]}
+chat_histories = {}
+
 class UserQuery(BaseModel):
     message: str  # user message
     confirmation: bool | None = None  # True/False for standard confirmation
     regenerate: bool | None = None # True if user wants to regenerate preview
 
 @router.post("/ask")
-async def handle_user_query(query: UserQuery, token_info: tuple[str, dict] = Depends(verify_google_token)):
-    user_id, access_token = token_info # Unpack user_id and access_token
+async def handle_user_query(query: UserQuery, token_info: tuple[str, Credentials] = Depends(verify_google_token)):
+    user_id, creds = token_info # Unpack user_id and Credentials object
     user_message = query.message
     confirmation_choice = query.confirmation
     regenerate_request = query.regenerate
@@ -109,7 +114,7 @@ async def handle_user_query(query: UserQuery, token_info: tuple[str, dict] = Dep
                     doc_id, doc_url = await run_langchain_doc_creation(
                         original_request=original_message,
                         generated_title=file_name,
-                        access_token=access_token
+                        access_token=creds
                     )
 
                     if doc_id and doc_url:
@@ -180,7 +185,7 @@ async def handle_user_query(query: UserQuery, token_info: tuple[str, dict] = Dep
             print(f"Attempting to fetch context for target: {target_name}")
             try:
                 # ASSUMPTION: get_drive_item_content exists in google_service
-                file_content_context = await get_drive_item_content(target_name, user_id, access_token) # Pass access_token if needed by service
+                file_content_context = await get_drive_item_content(target_name, creds) # Pass creds object
                 if not file_content_context:
                      print(f"Warning: No content found or retrieved for target '{target_name}'. Proceeding without file context.")
                 else:
@@ -192,21 +197,28 @@ async def handle_user_query(query: UserQuery, token_info: tuple[str, dict] = Dep
         # +++ Load Drive Index +++
         drive_index = load_index(user_id) or []
         print(f"Loaded drive index for analysis context ({len(drive_index)} items).")
+        # +++ Get Chat History +++
+        current_history = chat_histories.get(user_id, [])
         # +++++++++++++++++++++++
          
         # Call the analysis service with the query and potentially context
         analysis_result = await analyze_content(
             analysis_query,
             file_content_context=file_content_context, # Pass file content
-            drive_index=drive_index                 # Pass drive index
+            drive_index=drive_index,                # Pass drive index
+            chat_history=current_history            # Pass chat history
         )
-         
-        if analysis_result.get("error"):
-             raise HTTPException(status_code=500, detail=analysis_result["error"])
+        
+        # Unpack result and updated history
+        analysis_result_dict, updated_history = analysis_result
+        chat_histories[user_id] = updated_history # Store updated history
+
+        if analysis_result_dict.get("error"):
+            raise HTTPException(status_code=500, detail=analysis_result_dict["error"])
         else:
             return {
                 "success": True,
-                "message": analysis_result.get("analysis", "Analysis complete."),
+                "message": analysis_result_dict.get("analysis", "Analysis complete."),
                 "type": "analysis_result"
             }
             
@@ -217,6 +229,8 @@ async def handle_user_query(query: UserQuery, token_info: tuple[str, dict] = Dep
         print(f"Unrecognized action parsed: {action}. Falling back to general response.")
         try:
             drive_index = load_index(user_id) or []
+            current_history = chat_histories.get(user_id, []) # Get current history
+
             if drive_index:
                 index_prompt_lines = [f"- {item['name']} ({'Folder' if item.get('mimeType') == 'application/vnd.google-apps.folder' else 'File'}, id:{item['id']})" for item in drive_index[:200]]
                 formatted_index = "\n".join(index_prompt_lines)
@@ -226,24 +240,26 @@ async def handle_user_query(query: UserQuery, token_info: tuple[str, dict] = Dep
             
             print(f"[Debug] Drive context length: {len(drive_context)} chars for fallback")
             response_content = await generate_gemini_response(
-                user_message, drive_context=drive_context
+                user_message, 
+                drive_context=drive_context,
+                chat_history=current_history # Pass history
             )
-            try:
-                response_data = json.loads(response_content)
-                return {
-                    "success": True,
-                    "message": response_data.get("message", "General fallback response."),
-                    "type": "fallback_message"
-                }
-            except json.JSONDecodeError as json_err: 
-                print(f"Error decoding fallback Gemini JSON response: {json_err}")
-                return {"success": False, "message": "Error processing AI fallback response."}
-            except Exception as e: 
-                print(f"Error generating fallback response: {e}")
-                raise HTTPException(status_code=500, detail="Sorry, I encountered an error trying to respond.")
-        except json.JSONDecodeError:
-            print("Error decoding main Gemini JSON response.") 
-            return {"success": False, "message": "Error processing initial AI response."}
+            
+            # Unpack response and updated history
+            response_text, updated_history = response_content 
+            chat_histories[user_id] = updated_history # Store updated history
+            
+            # Return the text response directly
+            return {
+                "success": True,
+                "message": response_text,
+                "type": "fallback_message"
+            }
+                
+        except Exception as e: 
+            print(f"Error generating fallback response: {e}")
+            raise HTTPException(status_code=500, detail="Sorry, I encountered an error trying to respond.")
+        
         except Exception as e:
             print(f"An error occurred in handle_user_query: {e}")
             import traceback

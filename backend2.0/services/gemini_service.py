@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_MODEL_NAME = "models/gemini-1.5-flash"  # Use 1.5 flash for potentially better instruction following
+GEMINI_MODEL_NAME = "models/gemini-2.0-flash"  # Use 2.0 flash for potentially better instruction following
 
 # --- Updated System Prompt ---
 SYSTEM_PROMPT = """You are an instruction parser for a Google Drive Assistant. Your goal is to understand if the user wants to 'createDoc' or 'analyze' something in their Drive. 
@@ -76,8 +76,18 @@ async def generate_doc_preview(file_name: str) -> str:
         print(f"Gemini preview error: {e}")
         return "Failed to generate preview."
     
-async def generate_gemini_response(prompt: str, drive_context: str | None = None) -> str:
-    """Generates a response using Gemini, optionally prepending Drive context."""
+async def generate_gemini_response(
+    prompt: str, 
+    drive_context: str | None = None,
+    chat_history: list | None = None
+) -> tuple[str, list]: 
+    """Generates a response from Gemini, potentially using Drive context and chat history."""
+    if not GEMINI_API_KEY:
+        print("Error: Gemini API Key not configured.")
+        return "⚠️ Gemini service not configured.", chat_history or []
+ 
+    genai.configure(api_key=GEMINI_API_KEY)
+ 
     try:
         full_prompt = prompt
         if drive_context:
@@ -92,18 +102,30 @@ async def generate_gemini_response(prompt: str, drive_context: str | None = None
         model = genai.GenerativeModel(
             GEMINI_MODEL_NAME,
             system_instruction="You are a helpful Google Drive assistant. Use the provided context about the user's Drive files if available."
-            system_instruction="You are a document content generator."
         )
-        response = await model.generate_content_async(full_prompt) # Use the combined prompt
-        return response.text
-        response = await model.generate_content_async(full_prompt)
-        return response.text.strip()
+        
+        # Start chat session with existing history
+        chat = model.start_chat(history=chat_history or [])
+        
+        # Send the new message (including context)
+        response = await chat.send_message_async(full_prompt)
+        
+        # Return response text and the updated history from the chat object
+        return response.text.strip(), chat.history
     except Exception as e:
         print(f"Error generating Gemini response: {e}")
-        return "⚠️ Gemini failed to generate a response."
+        return "⚠️ Gemini failed to generate a response.", chat_history or [] # Return original history on error
 
-        print(f"Error during Gemini content generation: {e}")
-        return "⚠️ Failed to generate document content."
+# Example usage (for testing):
+# if __name__ == "__main__":
+#     import asyncio
+#     async def main():
+#         # test_message = "create a document called My Awesome Plan"
+#         test_message = "summarize the document 'Project Proposal'"
+#         # test_message = "what is the capital of spain?"
+#         result = await parse_user_message(test_message)
+#         print("Final parsed result:", result)
+#     asyncio.run(main())
 
 # Example usage (for testing):
 # if __name__ == "__main__":

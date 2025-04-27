@@ -8,23 +8,30 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 # Consider a different model or prompt structure for analysis tasks
 GEMINI_MODEL_NAME = "models/gemini-2.0-flash" 
 
-async def analyze_content(user_query: str, file_content_context: str | None = None, drive_index: list[dict] | None = None) -> dict:
+async def analyze_content(
+    user_query: str, 
+    file_content_context: str | None = None, 
+    drive_index: list[dict] | None = None,
+    chat_history: list | None = None
+) -> tuple[dict, list]: 
     """ 
     Analyzes content using the Gemini API based on the user's query,
-    optionally using specific file content and/or the user's Drive index as context.
+    optionally using specific file content and/or the user's Drive index as context,
+    and an optional existing conversation history.
 
     Args:
         user_query: The specific question or analysis task requested by the user.
         file_content_context: Optional content fetched from a specific Google Drive item.
         drive_index: Optional list representing the user's Google Drive file/folder structure.
+        chat_history: Optional existing conversation history.
 
     Returns:
-        A dictionary containing the analysis result or an error.
+        A tuple containing the analysis result dictionary and the updated chat history.
     """
     if not GEMINI_API_KEY:
         print("Error: Gemini API Key not configured.")
-        return {"error": "Gemini service not configured."}
-    
+        return {"error": "Gemini service not configured."}, chat_history or []
+
     genai.configure(api_key=GEMINI_API_KEY)
     
     # --- Format Drive Index Context ---
@@ -61,13 +68,21 @@ Based on the provided context (if any) and the user query, please perform the re
 
     try:
         model = genai.GenerativeModel(GEMINI_MODEL_NAME)
-        response = await model.generate_content_async(prompt)
+        # Start chat session with existing history
+        chat = model.start_chat(history=chat_history or [])
+        
+        # Send the new analysis prompt
+        response = await chat.send_message_async(prompt)
         analysis_result = response.text
         print(f"[analyze_content] Received analysis from Gemini.")
-        return {"analysis": analysis_result}
+        
+        # Return analysis result and updated history
+        return {"analysis": analysis_result}, chat.history
+
     except Exception as e:
         print(f"Error during Gemini API call in analyze_content: {e}")
-        return {"error": f"Failed to get analysis from AI: {e}"}
+        # Return error and original history
+        return {"error": f"Failed to get analysis from AI: {e}"}, chat_history or []
 
 # Example usage (for testing):
 # if __name__ == "__main__":
