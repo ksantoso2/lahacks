@@ -24,8 +24,8 @@ app.add_middleware(
     SessionMiddleware,
     secret_key=os.getenv("SESSION_SECRET_KEY", "a_default_secret_key"),
     max_age=7 * 24 * 60 * 60, 
-    https_only=False, 
-    # same_site='lax' 
+    https_only=True,  # Must be True for SameSite=None
+    same_site='none'  # Allow cross-site cookie sending
 )
 
 # --- CORS Middleware ---

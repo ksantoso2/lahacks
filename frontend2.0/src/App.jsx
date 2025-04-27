@@ -103,7 +103,8 @@ function App() {
         {
             headers: {
                 'Content-Type': 'application/json',
-            }
+            },
+            withCredentials: true // Add this line to send cookies
         }
       );
 
