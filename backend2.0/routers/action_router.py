@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from auth.auth import verify_google_token
 
 from services.gemini_service import parse_user_message, generate_doc_preview, generate_gemini_response
-from services.google_service import create_google_doc, get_drive_item_content
+from services.google_service import get_drive_item_content, run_langchain_doc_creation
 from services.analyze_service import analyze_content
 
 router = APIRouter()
@@ -103,14 +103,21 @@ async def handle_user_query(query: UserQuery, token_info: tuple[str, dict] = Dep
             
             elif confirmation_choice is True:
                 try:
-                    print(f"User confirmed creation for '{file_name}'. Creating document...")
-                    file_id, file_url = await create_google_doc(file_name, user_token)
-                    del pending_requests[user_token] # Clear state on success
-                    return {
-                        "success": True,
-                        "message": f"✅ Document '{file_name}' created! Here's the link: {file_url}",
-                        "docUrl": file_url
-                    }
+                    print(f"User confirmed. Running LangChain creation for: {original_message}")
+                    doc_id, doc_url = await run_langchain_doc_creation(
+                        original_request=original_message,
+                        generated_title=file_name,
+                        access_token=user_token
+                    )
+
+                    if doc_id and doc_url:
+                        response_message = f"Document '{file_name}' created successfully! You can access it here: {doc_url}"
+                        del pending_requests[user_token] # Clear state on success
+                        return {
+                            "success": True,
+                            "message": response_message,
+                            "docUrl": doc_url
+                        }
                 except Exception as e:
                     print(f"Error creating doc after confirmation: {e}")
                     del pending_requests[user_token] # Clear pending on error

@@ -5,21 +5,105 @@ from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload
 import io
 
-async def create_google_doc(title: str, access_token: str):
+# --- LangChain Imports ---
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+
+# Use direct imports assuming main.py is run from the backend2.0 directory
+from langchain_google_doc.llms import gemini_llm # Correct variable name
+from langchain_google_doc.prompts import content_generation_template
+
+
+async def create_google_doc(title: str, access_token: str, content: str | None = None):
     """
-    Creates a Google Doc with the given title.
+    Creates a Google Doc with the given title and optionally inserts content.
     Returns (docId, docUrl).
     """
     creds = Credentials(token=access_token)
     service = build('docs', 'v1', credentials=creds)
 
-    document = service.documents().create(body={
-        "title": title
-    }).execute()
+    try:
+        # 1. Create the document with the title
+        document = service.documents().create(body={
+            "title": title
+        }).execute()
 
-    doc_id = document.get('documentId')
-    doc_url = f"https://docs.google.com/document/d/{doc_id}/edit"
-    return doc_id, doc_url
+        doc_id = document.get('documentId')
+        doc_url = f"https://docs.google.com/document/d/{doc_id}/edit"
+        print(f"Created Google Doc: ID={doc_id}, Title='{title}'")
+
+        # 2. If content is provided, insert it
+        if content and doc_id:
+            print(f"Inserting content into doc {doc_id}...")
+            # Documents start with a newline character, insert at index 1
+            requests = [
+                {
+                    'insertText': {
+                        'location': {
+                            'index': 1, # Insert at the beginning of the document body
+                        },
+                        'text': content
+                    }
+                }
+            ]
+            # Execute the batch update to insert the text
+            service.documents().batchUpdate(documentId=doc_id, body={'requests': requests}).execute()
+            print(f"Successfully inserted content into doc {doc_id}")
+
+        return doc_id, doc_url
+
+    except HttpError as error:
+        print(f"An API error occurred while creating/updating the doc: {error}")
+        # Depending on the error, you might want to raise it or return None
+        # For now, let's print and return None to indicate failure
+        return None, None
+    except Exception as e:
+        print(f"An unexpected error occurred in create_google_doc: {e}")
+        return None, None
+
+
+async def run_langchain_doc_creation(original_request: str, generated_title: str, access_token: str):
+    """
+    Generates Google Doc content using LangChain based on the original request,
+    then creates the document with the generated title and content.
+    Returns (docId, docUrl) or (None, None) on failure.
+    """
+    print(f"Running LangChain generation for request: '{original_request}'")
+    try:
+        # 1. Prepare the LangChain prompt and chain for content generation
+        # Use the specific prompt template designed for content generation
+        content_prompt = ChatPromptTemplate.from_template(content_generation_template)
+        # Chain: Prompt -> LLM -> String Output
+        content_chain = content_prompt | gemini_llm | StrOutputParser() # Use the imported gemini_llm
+
+        # 2. Invoke the chain asynchronously to generate content
+        print("Invoking LangChain content generation chain...")
+        # Pass the original request using the key expected by the prompt ('topic')
+        generated_content = await content_chain.ainvoke({"topic": original_request})
+        print("LangChain content generation complete.")
+        # print(f"Generated Content Preview (first 100 chars): {generated_content[:100]}...") # Optional: Log preview
+
+        if not generated_content:
+             print("Error: LangChain generation failed to produce content.")
+             return None, None # Indicate failure
+
+        # 3. Call the modified create_google_doc with title and the generated content
+        print(f"Calling create_google_doc with title='{generated_title}' and LangChain content...")
+        doc_id, doc_url = await create_google_doc(
+            title=generated_title,
+            access_token=access_token,
+            content=generated_content # Pass the full content here
+        )
+
+        return doc_id, doc_url
+
+    except Exception as e:
+        # Log the exception for debugging
+        print(f"An error occurred during LangChain document creation process: {e}")
+        import traceback
+        traceback.print_exc() # Print detailed traceback
+        return None, None # Indicate failure
+
 
 async def get_drive_item_content(target_name: str, access_token: str) -> str | None:
     """
