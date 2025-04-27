@@ -20,7 +20,7 @@ class UserQuery(BaseModel):
     confirmation: bool | None = None  # True/False for standard confirmation
     regenerate: bool | None = None # True if user wants to regenerate preview
 
-@router.post("/api/ask")
+@router.post("/ask")
 async def handle_user_query(query: UserQuery, token_info: tuple[str, dict] = Depends(verify_google_token)):
     user_id, access_token = token_info # Unpack user_id and access_token
     user_message = query.message
@@ -45,8 +45,8 @@ async def handle_user_query(query: UserQuery, token_info: tuple[str, dict] = Dep
         if pending_state == 'confirm_preview_gen':
             if confirmation_choice is True:
                 try:
-                    print(f"Generating preview for '{file_name}' based on: {original_message}")
-                    preview = await generate_doc_preview(original_message, file_name)
+                    print(f"Generating preview for '{file_name}'")
+                    preview = await generate_doc_preview(file_name) # Pass only file_name
                     # Update state to confirm creation, store preview
                     pending_requests[user_id]['state'] = 'confirm_create'
                     pending_requests[user_id]['preview'] = preview
@@ -175,22 +175,32 @@ async def handle_user_query(query: UserQuery, token_info: tuple[str, dict] = Dep
         if not analysis_query:
             raise HTTPException(status_code=400, detail="Analysis query is missing.")
 
-        context = None
+        file_content_context = None # Renamed for clarity
         if target_name:
             print(f"Attempting to fetch context for target: {target_name}")
             try:
                 # ASSUMPTION: get_drive_item_content exists in google_service
-                context = await get_drive_item_content(target_name, user_id)
-                if not context:
-                     print(f"Warning: No content found or retrieved for target '{target_name}'. Proceeding without context.")
+                file_content_context = await get_drive_item_content(target_name, user_id, access_token) # Pass access_token if needed by service
+                if not file_content_context:
+                     print(f"Warning: No content found or retrieved for target '{target_name}'. Proceeding without file context.")
                 else:
-                     print(f"Successfully fetched context for '{target_name}'.")
+                     print(f"Successfully fetched file context for '{target_name}'.")
             except Exception as e:
-                print(f"Error fetching context for '{target_name}': {e}")
-        
+                print(f"Error fetching file context for '{target_name}': {e}")
+                # Decide if you want to raise an error or proceed without file context
+
+        # +++ Load Drive Index +++
+        drive_index = load_index(user_id) or []
+        print(f"Loaded drive index for analysis context ({len(drive_index)} items).")
+        # +++++++++++++++++++++++
+         
         # Call the analysis service with the query and potentially context
-        analysis_result = await analyze_content(analysis_query, context)
-        
+        analysis_result = await analyze_content(
+            analysis_query,
+            file_content_context=file_content_context, # Pass file content
+            drive_index=drive_index                 # Pass drive index
+        )
+         
         if analysis_result.get("error"):
              raise HTTPException(status_code=500, detail=analysis_result["error"])
         else:
