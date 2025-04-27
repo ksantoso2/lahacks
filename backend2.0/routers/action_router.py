@@ -85,7 +85,7 @@ async def handle_user_query(query: UserQuery, token_info: tuple[str, Credentials
                  elif pending_state == 'moveDoc_target_pending':
                     # Step 2: Validate destination folder and ask for confirmation
                     target_folder_name = user_message
-                    target_folder = find_item_by_name(target_folder_name, user_id)
+                    target_folder = find_item_by_name(target_folder_name, user_id, creds)
 
                     file_to_move = pending.get('file_to_move') # Retrieve stored file info
                     file_display_name = pending.get('file_display_name', pending.get('doc_name')) # Use stored display name
@@ -193,13 +193,11 @@ async def handle_user_query(query: UserQuery, token_info: tuple[str, Credentials
                                 return {
                                     "success": True,
                                     "message": (
-                                        f"📝 Okay, here's a new preview for **'{file_name}'**:\n\n"
-                                        f"> {new_preview}\n\n"
-                                        f"Would you like me to create this document now?"
+                                        f"(Regenerated Preview)\n{new_preview}\n\nConfirm creation?"
                                     ),
                                     "needsConfirmation": True,
-                                    "confirmationType": "doc_create",
-                                    "allowRegenerate": True
+                                    "confirmationType": "doc_create", # Correct type for create buttons
+                                    "allowRegenerate": True # Allow further regeneration
                                 }
                             except Exception as e:
                                 print(f"Error regenerating preview: {e}")
@@ -245,7 +243,7 @@ async def handle_user_query(query: UserQuery, token_info: tuple[str, Credentials
                                 )
 
                                 if doc_id and doc_url:
-                                    response_message = f"Document '{file_name}' created successfully! You can access it here: {doc_url}"
+                                    response_message = f"✅ Document **'{file_name}'** created successfully! You can access it [here]({doc_url})."
                                     del pending_requests[user_id] # Clear state on success
                                 return {
                                     "success": True,
@@ -260,13 +258,19 @@ async def handle_user_query(query: UserQuery, token_info: tuple[str, Credentials
                         elif confirmation_choice is False:
                             print("User cancelled document creation.")
                             del pending_requests[user_id]
-                            return {"success": False, "message": "❌ Document creation canceled."}
+                            return {"success": False, "message": "❌ Document creation canceled.", "needsConfirmation": False}
                 
                         else:
                             # User sent a message instead of confirming
-                            del pending_requests[user_id] # Clear state and re-parse message
-                            print("Confirmation ambiguity. Clearing state and reprocessing message.")
-                            # Fall through to re-process the message outside the confirmation block
+                            print("Confirmation ambiguity. Clearing state.")
+                            if user_id in pending_requests:
+                                del pending_requests[user_id]
+                            # Don't fall through. Tell user action cancelled.
+                            return {
+                                "success": False,
+                                "message": "Action cancelled due to ambiguous response. Please state your request again.",
+                                "needsConfirmation": False # Ensure no buttons appear
+                            }
             # --- Handle unexpected state --- (This is the 'else' for the pending_state checks)
         else:
             print(f"WARNING: Unhandled pending state '{pending_state}' for user {user_id[:10]}. Clearing state.")
@@ -287,25 +291,25 @@ async def handle_user_query(query: UserQuery, token_info: tuple[str, Credentials
                 doc_name = parsed.get("doc_name")
                 if not doc_name:
                      # Handle case where Gemini couldn't extract the doc name
-                    return {"message": "Which document would you like to move?"}
+                    return {"message": "Which document or folder would you like to move? Please specify its name."}
 
                 # Find the file first
-                file_to_move = find_item_by_name(doc_name, user_id)
+                file_to_move = find_item_by_name(doc_name, user_id, creds)
                 if not file_to_move:
                     # Don't set pending state if file not found
-                    return {"message": f"❌ Sorry, I couldn't find a file named '{doc_name}' in your Drive."}
+                    return {"message": f"❌ Sorry, I couldn't find a document or folder named '{doc_name}'."}
                 else:
                     # File found, store details and set state to ask for target
                     file_url = get_google_drive_url(file_to_move)
                     file_display_name = f"[{doc_name}]({file_url})" if file_url else doc_name
 
                     pending_requests[user_id] = {
-                        'state': 'moveDoc_initial', # Set the state
+                        'state': 'moveDoc_target_pending', # Match the state expected when destination is provided
                         'doc_name': doc_name,
                         'file_to_move': file_to_move,
                         'file_display_name': file_display_name
                     }
-                    print(f"File '{doc_name}' found (ID: {file_to_move.get('id')}). Setting state to moveDoc_initial for user {user_id[:10]}...")
+                    print(f"File '{doc_name}' found (ID: {file_to_move.get('id')}). Setting state to moveDoc_target_pending for user {user_id[:10]}...")
 
                     # --- Instead of recursing, return the prompt for the 'moveDoc_initial' state ---
                     return {
@@ -339,172 +343,115 @@ async def handle_user_query(query: UserQuery, token_info: tuple[str, Credentials
                      if user_id in pending_requests:
                          del pending_requests[user_id]
                      raise HTTPException(status_code=500, detail=f"Failed to process document creation request: {e}")
-            return {
-                "success": True,
-                "message": f"I can create a document named **'{file_name}'**. Would you like me to generate a preview first?",
-                "needsConfirmation": True,
-                "confirmationType": "preview_gen"
-            }
-        except Exception as e:
-             print(f"Error initiating createDoc flow: {e}")
-             if user_id in pending_requests:
-                 del pending_requests[user_id]
-             raise HTTPException(status_code=500, detail=f"Failed to process document creation request: {e}")
-
-    elif action == "analyze":
-        target_name = parsed.get("target")
-        analysis_query = parsed.get("query")
-
-        if not analysis_query:
-            raise HTTPException(status_code=400, detail="Analysis query is missing.")
-            # --- Handle Analyze Action ---
             elif action == "analyze":
                 target_name = parsed.get("target")
                 analysis_query = parsed.get("query")
-                
+
                 if not analysis_query:
                     raise HTTPException(status_code=400, detail="Analysis query is missing.")
 
-        file_content_context = None
-        if target_name:
-            print(f"Attempting to fetch context for target: {target_name}")
-            try:
-                file_content_context = await get_drive_item_content(target_name, creds)
-                if not file_content_context:
-                    print(f"❌ Could not find content for '{target_name}'.")
-                    raise HTTPException(status_code=404, detail=f"❌ I couldn't find a document named '{target_name}' in your Drive.")
-                else:
-                    print(f"✅ Successfully fetched file context for '{target_name}'.")
-            except Exception as e:
-                print(f"Error fetching file context for '{target_name}': {e}")
-                raise HTTPException(status_code=500, detail=f"Error accessing document '{target_name}': {e}")
-                file_content_context = None # Renamed for clarity
+                file_content_context = None
                 if target_name:
                     print(f"Attempting to fetch context for target: {target_name}")
                     try:
-                        # ASSUMPTION: get_drive_item_content exists in google_service
-                        file_content_context = await get_drive_item_content(target_name, creds) # Pass creds object
+                        file_content_context = await get_drive_item_content(target_name, creds)
                         if not file_content_context:
-                             print(f"Warning: No content found or retrieved for target '{target_name}'. Proceeding without file context.")
+                            print(f"❌ Could not find content for '{target_name}'.")
+                            raise HTTPException(status_code=404, detail=f"❌ I couldn't find a document named '{target_name}' in your Drive.")
                         else:
-                             print(f"Successfully fetched file context for '{target_name}'.")
+                            print(f"✅ Successfully fetched file context for '{target_name}'.")
                     except Exception as e:
                         print(f"Error fetching file context for '{target_name}': {e}")
-                        # Decide if you want to raise an error or proceed without file context
+                        raise HTTPException(status_code=500, detail=f"Error accessing document '{target_name}': {e}")
 
-                # +++ Load Drive Index +++
                 drive_index = load_index(user_id) or []
                 print(f"Loaded drive index for analysis context ({len(drive_index)} items).")
-                # Format index with URLs for the analysis prompt
-                index_prompt_lines = []
-                for item in drive_index:
-                    url = get_google_drive_url(item)
-                    name = item.get('name', 'Unnamed Item')
-                    item_type = 'Folder' if item.get('mimeType') == 'application/vnd.google-apps.folder' else 'File'
-                    if url:
-                        index_prompt_lines.append(f"- [{name}]({url}) ({item_type})")
-                    else:
-                        index_prompt_lines.append(f"- {name} ({item_type})") # Fallback if no URL
-
-                formatted_index = "\n".join(index_prompt_lines)
-                drive_context = f"\nUser's Google Drive Contents:\n{formatted_index}\n---"
-                # +++ Get Chat History +++
                 current_history = chat_histories.get(user_id, [])
-                # +++++++++++++++++++++++
-                 
-                # Call the analysis service with the query and potentially context
+
                 analysis_result = await analyze_content(
                     analysis_query,
-                    file_content_context=file_content_context, # Pass file content
-                    drive_index=drive_index,                # Pass drive index
-                    chat_history=current_history            # Pass chat history
+                    file_content_context=file_content_context,
+                    drive_index=drive_index,
+                    chat_history=current_history
                 )
-                
+
                 # Unpack result and updated history
                 analysis_result_dict, updated_history = analysis_result
-                chat_histories[user_id] = updated_history # Store updated history
-        drive_index = load_index(user_id) or []
-        print(f"Loaded drive index for analysis context ({len(drive_index)} items).")
-        current_history = chat_histories.get(user_id, [])
+                chat_histories[user_id] = updated_history  # Store updated history
 
-        analysis_result = await analyze_content(
-            analysis_query,
-            file_content_context=file_content_context,
-            drive_index=drive_index,
-            chat_history=current_history
-        )
+                if analysis_result_dict.get("error"):
+                    raise HTTPException(status_code=500, detail=analysis_result_dict["error"])
 
-        # Unpack result and updated history
-        analysis_result_dict, updated_history = analysis_result
-        chat_histories[user_id] = updated_history  # Store updated history
-
-        if analysis_result_dict.get("error"):
-            raise HTTPException(status_code=500, detail=analysis_result_dict["error"])
-
-        # --- New: Actually update the doc ---
-        rewritten_content = analysis_result_dict.get("analysis")
-        if target_name and rewritten_content:
-            from services.google_service import find_doc_id_by_name, update_google_doc
-            doc_id = await find_doc_id_by_name(target_name, creds)
-            if doc_id:
-                success = await update_google_doc(doc_id, rewritten_content, creds)
-                if success:
-                    return {
-                        "success": True,
-                        "message": f"✅ Document '{target_name}' has been updated successfully.",
-                        "type": "analysis_result"
-                    }
+                # --- New: Actually update the doc ---
+                rewritten_content = analysis_result_dict.get("analysis")
+                if target_name and rewritten_content:
+                    from services.google_service import find_doc_id_by_name, update_google_doc
+                    doc_id = await find_doc_id_by_name(target_name, creds)
+                    if doc_id:
+                        success = await update_google_doc(doc_id, rewritten_content, creds)
+                        if success:
+                            return {
+                                "success": True,
+                                "message": f"✅ Document '{target_name}' has been updated successfully.",
+                                "type": "analysis_result"
+                            }
+                        else:
+                            return {
+                                "success": False,
+                                "message": f"⚠️ Couldn't update the document '{target_name}'.",
+                                "type": "analysis_result"
+                            }
+                    else:
+                        return {
+                            "success": False,
+                            "message": f"❌ Couldn't find the document '{target_name}' in your Drive.",
+                            "type": "analysis_result"
+                        }
                 else:
                     return {
-                        "success": False,
-                        "message": f"⚠️ Couldn't update the document '{target_name}'.",
+                        "success": True,
+                        "message": rewritten_content or "Analysis complete.",
                         "type": "analysis_result"
                     }
-            else:
-                return {
-                    "success": False,
-                    "message": f"❌ Couldn't find the document '{target_name}' in your Drive.",
-                    "type": "analysis_result"
-                }
+
+            
+        elif parsed.get("error"):
+            raise HTTPException(status_code=400, detail=parsed.get("error"))
         else:
-            return {
-                "success": True,
-                "message": rewritten_content or "Analysis complete.",
-                "type": "analysis_result"
-            }
+            print(f"Unrecognized action parsed: {action}. Falling back to general response.")
+            try:
+                drive_index = load_index(user_id) or []
+                current_history = chat_histories.get(user_id, [])
 
-            
-    elif parsed.get("error"):
-        raise HTTPException(status_code=400, detail=parsed.get("error"))
-    else:
-        print(f"Unrecognized action parsed: {action}. Falling back to general response.")
-        try:
-            drive_index = load_index(user_id) or []
-            current_history = chat_histories.get(user_id, [])
-
-            if drive_index:
-                index_prompt_lines = [f"- {item['name']} ({'Folder' if item.get('mimeType') == 'application/vnd.google-apps.folder' else 'File'}, id:{item['id']})" for item in drive_index[:200]]
-                formatted_index = "\n".join(index_prompt_lines)
-                drive_context = f"\nUser's Google Drive Contents (partial list):\n{formatted_index}\n---"
-            else:
-                drive_context = "\nUser's Google Drive Contents: (Could not load or is empty)"
-            
-            print(f"[Debug] Drive context length: {len(drive_context)} chars for fallback")
-            response_content = await generate_gemini_response(
-                user_message, 
-                drive_context=drive_context,
-                chat_history=current_history
-            )
-            
-            response_text, updated_history = response_content 
-            chat_histories[user_id] = updated_history
-            
-            return {
-                "success": True,
-                "message": response_text,
-                "type": "fallback_message"
-            }
+                if drive_index:
+                    index_prompt_lines = [f"- {item['name']} ({'Folder' if item.get('mimeType') == 'application/vnd.google-apps.folder' else 'File'}, id:{item['id']})" for item in drive_index[:200]]
+                    formatted_index = "\n".join(index_prompt_lines)
+                    drive_context = f"\nUser's Google Drive Contents (partial list):\n{formatted_index}\n---"
+                else:
+                    drive_context = "\nUser's Google Drive Contents: (Could not load or is empty)"
                 
-        except Exception as e: 
-            print(f"Error generating fallback response: {e}")
-            raise HTTPException(status_code=500, detail="Sorry, I encountered an error trying to respond.")
+                print(f"[Debug] Drive context length: {len(drive_context)} chars for fallback")
+                response_content = await generate_gemini_response(
+                    user_message, 
+                    drive_context=drive_context,
+                    chat_history=current_history
+                )
+                
+                response_text, updated_history = response_content 
+                chat_histories[user_id] = updated_history
+                
+                return {
+                    "success": True,
+                    "message": response_text,
+                    "type": "fallback_message"
+                }
+                    
+            except Exception as e: 
+                print(f"Error generating fallback response: {e}")
+                raise HTTPException(status_code=500, detail="Sorry, I encountered an error trying to respond.")
+
+    except HTTPException as http_exc:
+        raise http_exc
+    except Exception as e:
+        print(f"Error handling user query: {e}")
+        raise HTTPException(status_code=500, detail="Sorry, I encountered an error trying to respond.")

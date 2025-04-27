@@ -136,20 +136,52 @@ def get_google_drive_url(item: dict) -> str:
         return f"https://drive.google.com/file/d/{item_id}/view"
 
 # --- Find Item by Name (using cache) ---
-def find_item_by_name(item_name: str, user_id: str) -> dict | None:
-    """Searches the cached drive index for an item by exact name."""
+def find_item_by_name(item_name: str, user_id: str, creds: Credentials) -> dict | None:
+    """Searches the cached drive index, then falls back to Google Drive API search."""
     drive_index = load_index(user_id)
-    if not drive_index:
-        print(f"Warning: Drive index cache not found or empty for user {user_id} during search.")
+    if drive_index:
+        for item in drive_index:
+            if item.get('name') == item_name:
+                print(f"Found item '{item_name}' in cache (ID: {item.get('id')})")
+                return item # Return the first cache match
+    else:
+        print(f"Warning: Drive index cache not found or empty for user {user_id}. Proceeding with API search.")
+
+    # --- Fallback to API Search ---
+    print(f"Item '{item_name}' not found in cache for user {user_id}. Searching via Drive API...")
+    try:
+        service = build('drive', 'v3', credentials=creds)
+        # Search for files/folders with the exact name, not trashed
+        # Escape single quotes in the item name itself to avoid breaking the query
+        escaped_item_name = item_name.replace("'", "\\'")
+        query = f"name = '{escaped_item_name}' and trashed = false"
+       
+        results = service.files().list(
+            q=query,
+            spaces='drive',
+            fields='files(id, name, mimeType, parents, modifiedTime)',
+            pageSize=10 # Limit results slightly, usually expect 0 or 1
+        ).execute()
+       
+        items = results.get('files', [])
+       
+        if items:
+            # TODO: Handle multiple matches? For now, return the first.
+            first_item = items[0]
+            print(f"Found item '{item_name}' via API (ID: {first_item.get('id')})")
+            # Add a 'path' key like the cache for consistency, though it might be None/incomplete
+            first_item['path'] = first_item.get('name') 
+            return first_item
+        else:
+            print(f"Item '{item_name}' not found via API either.")
+            return None
+           
+    except HttpError as error:
+        print(f"An API error occurred during find_item_by_name: {error}")
         return None
-    
-    for item in drive_index:
-        if item.get('name') == item_name:
-            print(f"Found item '{item_name}' with ID {item.get('id')}")
-            return item # Return the first match
-            
-    print(f"Item '{item_name}' not found in cache for user {user_id}.")
-    return None
+    except Exception as e:
+        print(f"An unexpected error occurred during API search in find_item_by_name: {e}")
+        return None
 
 # ------------------------------------------------------------
 # Breadth-First Crawl to Build Complete Drive Index WITH Paths

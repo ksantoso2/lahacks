@@ -14,6 +14,7 @@ function ChatInterface({ backendUrl }) {
   const [confirmationPendingMsgId, setConfirmationPendingMsgId] = useState(null); // Track which message needs confirmation
   const [confirmationType, setConfirmationType] = useState(null); // 'preview_gen' or 'doc_create'
   const [allowRegenerate, setAllowRegenerate] = useState(false); // Track if regenerate is allowed
+  const [allowSkip, setAllowSkip] = useState(false); // Track if skip preview is allowed
   const messagesEndRef = useRef(null); // Ref for scrolling to bottom
 
   // Scroll to bottom when new messages arrive
@@ -39,52 +40,83 @@ function ChatInterface({ backendUrl }) {
   };
 
   const sendMessage = async (payload) => {
-    const messageToSend = payload?.message ?? inputValue; // Use payload message if provided, else use input
-    const confirmationToSend = payload?.confirmation; // Use payload confirmation if provided
-    const regenerateToSend = payload?.regenerate;     // Use payload regenerate if provided
+    const messageToSend = payload?.message ?? inputValue;
+    const confirmationToSend = payload?.confirmation;
+    const regenerateToSend = payload?.regenerate;
+    const skipToSend = payload?.skip_preview;
 
-    // Don't send empty messages unless it's a confirmation/action click
-    if (!messageToSend && confirmationToSend === undefined && regenerateToSend === undefined) return;
+    if (!messageToSend && confirmationToSend === undefined && regenerateToSend === undefined && skipToSend === undefined) return;
 
-    setIsLoading(true); // Show loading indicator
-    setConfirmationPendingMsgId(null); // Clear pending confirmation when sending new message or confirmation
-    setConfirmationType(null);
-    setAllowRegenerate(false);
+    // --- Add USER message FIRST if it's not a button click ---
+    if (confirmationToSend === undefined && regenerateToSend === undefined && skipToSend === undefined) {
+      const newUserMessage = { id: Date.now(), sender: 'user', text: messageToSend };
+      console.log("*** Adding user message ***");
+      console.log("Messages BEFORE user add:", messages);
+      console.log("User message object:", newUserMessage);
+      setMessages(prev => [...prev, newUserMessage]); // Add user message immediately
+      // Log might still be batched by React
+      console.log("Messages AFTER user add (call scheduled):", messages);
+      setInputValue(''); // Clear input immediately
+      // Clear any previous confirmation state when user types new message
+      setConfirmationPendingMsgId(null);
+      setConfirmationType(null);
+      setAllowRegenerate(false);
+      setAllowSkip(false);
+    }
+
+    setIsLoading(true);
 
     try {
-      // Construct payload, including confirmation or regenerate flag
       const response = await axios.post(`${backendUrl}/api/ask`, {
-        message: messageToSend, 
-        confirmation: confirmationToSend, // Send the confirmation value
-        regenerate: regenerateToSend,     // Send regenerate flag
-      }, {
-        withCredentials: true, // Send cookies with the request
-      });
+        message: messageToSend, // Send original text even for buttons
+        confirmation: confirmationToSend,
+        regenerate: regenerateToSend,
+        skip_preview: skipToSend,
+      }, { withCredentials: true });
 
-      const agentMessage = { 
-        id: Date.now(), // Assign unique ID
-        sender: 'agent', 
+      const agentMessage = { // Construct agent message object
+        id: response.data.messageId || `agent_${Date.now()}`,
+        sender: 'agent',
         text: response.data.message || "Sorry, I couldn't process that.",
-        needsConfirmation: response.data.needsConfirmation || false, // Store confirmation flag
-        confirmationType: response.data.confirmationType || null, // Store confirmation type
-        allowRegenerate: response.data.allowRegenerate || false // Store regenerate flag
+        needsConfirmation: response.data.needsConfirmation || false,
+        confirmationType: response.data.confirmationType || null,
+        allowRegenerate: response.data.allowRegenerate || false,
+        allowSkip: response.data.allowSkip || false
       };
-      setMessages((prev) => [...prev, agentMessage]);
+      
+      // --- Add AGENT message ---
+      setMessages((prev) => [...prev, agentMessage]); // Add agent message
+      console.log("Added agent message:", agentMessage);
 
-      // If this message needs confirmation, store its ID and type
+      // --- Update confirmation state based on agent response ---
       if (agentMessage.needsConfirmation) {
+        console.log(`Setting confirmation pending for Msg ID: ${agentMessage.id}, Type: ${agentMessage.confirmationType}, Regen: ${agentMessage.allowRegenerate}, Skip: ${agentMessage.allowSkip}`);
         setConfirmationPendingMsgId(agentMessage.id);
         setConfirmationType(agentMessage.confirmationType);
         setAllowRegenerate(agentMessage.allowRegenerate);
+        setAllowSkip(agentMessage.allowSkip);
+      } else {
+        // If the agent's response doesn't require confirmation, clear any previous pending state
+        console.log("Clearing confirmation state as agent response does not need it.");
+        setConfirmationPendingMsgId(null);
+        setConfirmationType(null);
+        setAllowRegenerate(false);
+        setAllowSkip(false);
       }
 
     } catch (error) {
-      console.error('Error sending message:', error);
-      const errorText = error.response?.data?.detail || 'An error occurred while connecting to the backend.';
-      setMessages((prev) => [...prev, { id: Date.now(), sender: 'agent', text: `Error: ${errorText}` }]);
+      console.error("Error sending message:", error);
+      const errorMsg = { id: `agent_${Date.now()}`, sender: 'agent', text: "⚠️ Error connecting to the backend." };
+      setMessages((prev) => [...prev, errorMsg]);
+      // Clear confirmation state on error too
+      setConfirmationPendingMsgId(null);
+      setConfirmationType(null);
+      setAllowRegenerate(false);
+      setAllowSkip(false);
     } finally {
       setIsLoading(false);
     }
+    // User message addition and input clearing moved BEFORE the try block
   };
 
   const handleKeyDown = (event) => {
@@ -97,68 +129,84 @@ function ChatInterface({ backendUrl }) {
   const handleConfirmation = async (choice) => {
     if (!confirmationPendingMsgId) return;
 
-    const payload = {
-      confirmation: choice,
-    };
+    console.log(`Handling confirmation: ${choice}, Pending Msg ID before send: ${confirmationPendingMsgId}`);
 
     // Send the confirmation choice
-    await sendMessage(payload);
+    await sendMessage({ confirmation: choice });
+  };
 
-    // Clear confirmation state after sending
-    setConfirmationPendingMsgId(null);
-    setConfirmationType(null);
-    setAllowRegenerate(false);
+  // Function to handle regeneration request
+  const handleRegenerate = async () => {
+    await sendMessage({ regenerate: true });
+  };
+
+  // Function to handle skipping preview
+  const handleSkipPreview = async () => {
+    await sendMessage({ skip_preview: true });
   };
 
   return (
     <div className={stylesModule.chatContainer}>
       <div className={stylesModule.chatHistory}>
-        {messages.map((msg, index) => (
-          <div
-            key={index}
-            // Combine base message class with specific user/agent class
-            className={`${stylesModule.message} ${msg.sender === 'user' ? stylesModule.userMessage : stylesModule.agentMessage}`}
-          >
-            {/* Render agent messages as Markdown, user messages as plain text */}
-            {msg.sender === 'agent' ? (
-              <ReactMarkdown>{msg.text}</ReactMarkdown>
-            ) : (
-              msg.text
-            )}
-            {/* Render buttons only if this message ID is the one pending confirmation */} 
-            {msg.id === confirmationPendingMsgId && (
-              <div className={stylesModule.confirmationButtons}>
-                {/* Buttons for Preview Generation Confirmation */} 
-                {confirmationType === 'preview_gen' && (
-                  <>
-                    <button onClick={() => handleConfirmation(true)} className={stylesModule.confirmButtonYes}>Yes, Generate Preview</button>
-                    <button onClick={() => handleConfirmation(false)} className={stylesModule.confirmButtonNo}>No, Cancel</button>
-                  </>
-                )}
-                
-                {/* Buttons for Document Creation Confirmation */} 
-                {confirmationType === 'doc_create' && (
-                  <>
-                    <button onClick={() => handleConfirmation(true)} className={stylesModule.confirmButtonYes}>Yes, Create</button>
-                    <button onClick={() => handleConfirmation(false)} className={stylesModule.confirmButtonNo}>No, Cancel</button>
-                    {/* Show Regenerate button only if allowed */} 
-                    {allowRegenerate && (
-                      <button onClick={() => sendMessage({ regenerate: true })} className={stylesModule.confirmButtonRegen}>Regenerate Preview</button>
-                    )}
-                  </>
-                )}
-                
-                {/* Buttons for Move Document Confirmation */} 
-                {confirmationType === 'moveDoc' && (
-                  <>
-                    <button onClick={() => handleConfirmation(true)} className={stylesModule.confirmButtonYes}>Yes</button>
-                    <button onClick={() => handleConfirmation(false)} className={stylesModule.confirmButtonNo}>No</button>
-                  </>
-                )}
-              </div>
-            )}
-          </div>
-        ))}
+        {messages.map((msg, index) => {
+          // --- Enhanced Render Logging --- 
+          console.log(
+            `Render Check: index=${index}, totalMsgs=${messages.length}, ` +
+            `msgId=${msg.id}, needsConfirm=${msg.needsConfirmation}, ` +
+            `confirmType=${msg.confirmationType}, allowRegen=${msg.allowRegenerate}, ` +
+            `allowSkip=${msg.allowSkip}`
+          );
+          return (
+            <div
+              key={index}
+              // Combine base message class with specific user/agent class
+              className={`${stylesModule.message} ${msg.sender === 'user' ? stylesModule.userMessage : stylesModule.agentMessage}`}
+            >
+              {/* Render agent messages as Markdown, user messages as plain text */}
+              {msg.sender === 'agent' ? (
+                <ReactMarkdown>{msg.text}</ReactMarkdown>
+              ) : (
+                msg.text
+              )}
+              {/* Render buttons only if this message is the LAST message AND needs confirmation */}
+              {index === messages.length - 1 && msg.needsConfirmation && (
+                <div className={stylesModule.confirmationButtons}>
+                  {/* Buttons for Preview Generation Confirmation */}
+                  {msg.confirmationType === 'preview_gen' && (
+                    <>
+                      <button onClick={() => handleConfirmation(true)} className={stylesModule.confirmButtonYes}>Yes, Generate Preview</button>
+                      <button onClick={() => handleConfirmation(false)} className={stylesModule.confirmButtonNo}>No, Cancel</button>
+                    </>
+                  )}
+                  
+                  {/* Buttons for Document Creation Confirmation */}
+                  {msg.confirmationType === 'doc_create' && (
+                    <>
+                      <button onClick={() => handleConfirmation(true)} className={stylesModule.confirmButtonYes}>Yes, Create</button>
+                      <button onClick={() => handleConfirmation(false)} className={stylesModule.confirmButtonNo}>No, Cancel</button>
+                      {/* Show Regenerate button only if allowed */}
+                      {msg.allowRegenerate && (
+                        <button onClick={handleRegenerate} className={stylesModule.confirmButtonRegen}>Regenerate Preview</button>
+                      )}
+                      {/* Show Skip Preview button only if allowed */}
+                      {msg.allowSkip && (
+                        <button onClick={handleSkipPreview} className={stylesModule.confirmButtonSkip}>Skip Preview & Create</button>
+                      )}
+                    </>
+                  )}
+                  
+                  {/* Buttons for Move Document Confirmation */}
+                  {msg.confirmationType === 'moveDoc' && (
+                    <>
+                      <button onClick={() => handleConfirmation(true)} className={stylesModule.confirmButtonYes}>Yes</button>
+                      <button onClick={() => handleConfirmation(false)} className={stylesModule.confirmButtonNo}>No</button>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
         <div ref={messagesEndRef} /> {/* Anchor for scrolling */}
       </div>
       <div className={stylesModule.inputContainer}>
