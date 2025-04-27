@@ -40,6 +40,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 # --- Include Routers ---
 app.include_router(auth_router, prefix="/auth", tags=["auth"])
 app.include_router(action_router.router, prefix="/api", tags=["actions"]) # Corrected: Access the 'router' attribute
