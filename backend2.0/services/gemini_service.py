@@ -22,6 +22,11 @@ If the action is 'analyze', include the 'target' (the file/folder name if specif
 Example: {"action_to_perform": "analyze", "target": "Project Plan Doc", "query": "summarize the main points"}
 Example: {"action_to_perform": "analyze", "target": null, "query": "What is the capital of France?"} # Handle general queries
 
+If the user wants to move a document, respond with:
+{"action_to_perform": "moveDoc", "doc_name": "Document Title", "source_folder": null, "target_folder": null}
+
+Only include folder names if specified.
+
 If the user’s query does not relate to Google Drive actions, respond with:
 {"action_to_perform": "none"}
 
