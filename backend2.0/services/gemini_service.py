@@ -27,6 +27,14 @@ If the user wants to move a document, respond with:
 
 Only include folder names if specified.
 
+If the user wants to delete a document, respond with:
+{"action_to_perform": "deleteDoc", "doc_name": "Document Title"}
+
+DO NOT provide instructions or explanations. Only respond with the JSON object.
+
+If the user wants to rename a document, respond with:
+{"action_to_perform": "renameDoc", "doc_name": "Document Title", "new_name": "New Document Title"}
+
 If the user’s query does not relate to Google Drive actions, respond with:
 {"action_to_perform": "none"}
 

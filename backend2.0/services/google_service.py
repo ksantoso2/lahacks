@@ -115,7 +115,6 @@ async def create_google_doc(title: str, creds: Credentials, content: str | None 
         print(f"An unexpected error occurred in create_google_doc: {e}")
         return None, None
 
-
 async def run_langchain_doc_creation(original_request: str, generated_title: str, creds: Credentials):
     """
     Generates Google Doc content using LangChain based on the original request,
@@ -158,6 +157,51 @@ async def run_langchain_doc_creation(original_request: str, generated_title: str
         import traceback
         traceback.print_exc() # Print detailed traceback
         return None, None # Indicate failure
+
+from googleapiclient.discovery import build
+
+async def get_doc_preview(doc_name: str, creds) -> tuple[str, str]:
+    """
+    Retrieves the first 50 words of a Google Doc by its name.
+    Returns (preview_text, doc_id).
+    """
+    service = build('drive', 'v3', credentials=creds)
+
+    # Search for the doc by name
+    results = service.files().list(
+        q=f"name = '{doc_name}' and mimeType = 'application/vnd.google-apps.document' and trashed = false",
+        fields="files(id, name)",
+        pageSize=1
+    ).execute()
+
+    if not results['files']:
+        raise Exception(f"❌ Document '{doc_name}' not found.")
+
+    doc_id = results['files'][0]['id']
+
+    # Fetch content using Docs API
+    docs_service = build('docs', 'v1', credentials=creds)
+    doc = docs_service.documents().get(documentId=doc_id).execute()
+    text_content = ""
+    for element in doc.get("body", {}).get("content", []):
+        if "paragraph" in element:
+            for el in element["paragraph"].get("elements", []):
+                text_content += el.get("textRun", {}).get("content", "")
+                if len(text_content.split()) >= 50:
+                    break
+            if len(text_content.split()) >= 50:
+                break
+
+    preview = " ".join(text_content.split()[:50])  # Limit to 50 words
+    return preview.strip(), doc_id
+
+async def delete_doc(doc_id: str, creds) -> str:
+    """
+    Deletes a Google Doc by its ID.
+    """
+    service = build('drive', 'v3', credentials=creds)
+    service.files().delete(fileId=doc_id).execute()
+    return "🗑️ Document deleted successfully."
 
 async def move_doc_to_folder(doc_name: str, source_folder: str, target_folder: str, creds: Credentials) -> str:
     """

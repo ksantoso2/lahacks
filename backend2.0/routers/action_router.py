@@ -4,7 +4,7 @@ from auth.auth import verify_google_token
 from google.oauth2.credentials import Credentials
 
 from services.gemini_service import parse_user_message, generate_doc_preview, generate_gemini_response
-from services.google_service import get_drive_item_content, run_langchain_doc_creation
+from services.google_service import get_drive_item_content, run_langchain_doc_creation, delete_doc, get_doc_preview
 from services.analyze_service import analyze_content
 from services.drive_cache import load_index
 import json
@@ -87,6 +87,24 @@ async def handle_user_query(query: UserQuery, token_info: tuple[str, Credentials
         elif pending_state in ['confirm_preview_gen', 'confirm_create']:
             file_name = pending['file_name']
             original_message = pending.get('original_message')
+
+            if pending_state == 'deleteDoc':
+                doc_name = pending['doc_name']
+                doc_id = pending['doc_id']
+
+                if user_message.lower() in ["yes", "y"]:
+                    try:
+                        result_message = await delete_doc(doc_id, creds)
+                        del pending_requests[user_id]
+                        return {"message": result_message}
+                    except Exception as e:
+                        del pending_requests[user_id]
+                        return {"message": f"❌ Failed to delete '{doc_name}': {e}"}
+                elif user_message.lower() in ["no", "n"]:
+                    del pending_requests[user_id]
+                    return {"message": "❌ Deletion canceled."}
+                else:
+                    return {"message": "Please respond with 'yes' or 'no'."}
 
             # --- State: Confirm Preview Generation --- 
             if pending_state == 'confirm_preview_gen':
@@ -248,7 +266,35 @@ async def handle_user_query(query: UserQuery, token_info: tuple[str, Credentials
             "confirmationType": "moveDoc"
         }
 
-    
+    if action == "deleteDoc":
+            doc_name = parsed.get("doc_name")
+
+            # Fetch preview
+            try:
+                preview_text, doc_id = await get_doc_preview(doc_name, creds)
+            except Exception as e:
+                return {"message": str(e)}
+
+            # Store in pending requests
+            pending_requests[user_id] = {
+                'state': 'deleteDoc',
+                'doc_name': doc_name,
+                'doc_id': doc_id,
+                'preview': preview_text
+            }
+
+            # Prompt for confirmation with preview
+            return {
+                "message": (
+                    f"⚠️ Confirm deletion of **'{doc_name}'**?\n\n"
+                    f"Preview (first 50 words):\n\n> {preview_text}\n\n"
+                    "Type 'yes' to confirm or 'no' to cancel."
+                ),
+                "needsConfirmation": True,
+                "confirmationType": "deleteDoc"
+            }
+
+
     # --- Handle Create Document Action (Initial request) ---
     if action == "createDoc":
         file_name = parsed.get("name", "Untitled Document")
