@@ -30,6 +30,42 @@ async def list_all_drive_items(creds: Credentials) -> list[dict]:
         page_token = resp.get("nextPageToken")
         if not page_token:
             break
+
+    # --- Build full path for each item ---
+    # Create a mapping from ID -> item to allow parent lookups
+    id_to_item: dict[str, dict] = {item["id"]: item for item in items}
+
+    # Cache computed paths to avoid repeated traversal
+    path_cache: dict[str, str] = {}
+
+    def compute_path(item_id: str) -> str:
+        """Recursively builds the full path for a Drive item by traversing parents."""
+        if item_id in path_cache:
+            return path_cache[item_id]
+
+        item = id_to_item.get(item_id)
+        if not item:
+            return ""  # Should not happen
+
+        name = item.get("name", "(untitled)")
+        parents = item.get("parents", [])
+
+        # Root-level items (no parents)
+        if not parents:
+            path_cache[item_id] = name
+            return name
+
+        # Google Drive API usually provides a single parent ID in the list (first element)
+        parent_id = parents[0]
+        parent_path = compute_path(parent_id)
+        full_path = f"{parent_path}/{name}" if parent_path else name
+        path_cache[item_id] = full_path
+        return full_path
+
+    # Compute and attach the path to each item
+    for item in items:
+        item["path"] = compute_path(item["id"])
+
     return items
 from .drive_cache import load_index, save_index
 
