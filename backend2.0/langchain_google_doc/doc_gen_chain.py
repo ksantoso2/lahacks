@@ -4,6 +4,7 @@ from .llms import gemini_llm
 from .prompts import CONTENT_GENERATION_PROMPT, TITLE_GENERATION_PROMPT
 from .tools import CreateGoogleDocTool  # Assuming the tool is defined properly
 
+
 async def generate_doc_content_and_title(topic: str) -> tuple[str, str]:
     """Generates document content and a title based on the topic."""
     print(f"Generating content for topic: '{topic}'...")
