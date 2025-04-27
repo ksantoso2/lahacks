@@ -24,6 +24,7 @@ class UserQuery(BaseModel):
     message: str  # user message
     confirmation: bool | None = None  # True/False for standard confirmation
     regenerate: bool | None = None # True if user wants to regenerate preview
+    skip_preview: bool | None = None # True if user wants to skip preview and create directly
 
 @router.post("/ask")
 async def handle_user_query(query: UserQuery, token_info: tuple[str, Credentials] = Depends(verify_google_token)):
@@ -31,12 +32,13 @@ async def handle_user_query(query: UserQuery, token_info: tuple[str, Credentials
     user_message = query.message
     confirmation_choice = query.confirmation
     regenerate_request = query.regenerate
+    skip_request = query.skip_preview
 
     # --- Log state ---
     print(f"User token: {user_id[:10]}...")
     pending_data = pending_requests.get(user_id)
     print(f"Pending data: {pending_data}")
-    print(f"Received query: message='{user_message}', confirmation={confirmation_choice}, regenerate={regenerate_request}")
+    print(f"Received query: message='{user_message}', confirmation={confirmation_choice}, regenerate={regenerate_request}, skip_preview={skip_request}")
 
     # --- Step 1: Check for and handle pending confirmation --- 
     if user_id in pending_requests:
@@ -88,8 +90,8 @@ async def handle_user_query(query: UserQuery, token_info: tuple[str, Credentials
             
             if regenerate_request is True:
                 try:
-                    print(f"Regenerating preview for '{file_name}' based on: {original_message}")
-                    new_preview = await generate_doc_preview(original_message, file_name)
+                    print(f"Regenerating preview for '{file_name}'")
+                    new_preview = await generate_doc_preview(file_name) # Pass only file_name
                     pending_requests[user_id]['preview'] = new_preview # Update stored preview
                     print(f"Preview regenerated.")
                     return {
@@ -108,13 +110,42 @@ async def handle_user_query(query: UserQuery, token_info: tuple[str, Credentials
                     # Don't delete pending state here, let user try again or cancel
                     raise HTTPException(status_code=500, detail=f"Failed to regenerate preview: {e}")
             
+            elif skip_request is True:
+                print(f"User skipped preview. Running LangChain creation for: {original_message}")
+                try:
+                    doc_id, doc_url = await run_langchain_doc_creation(
+                        original_request=original_message,
+                        generated_title=file_name,
+                        creds=creds
+                    )
+
+                    if doc_id and doc_url:
+                        # Clear pending state on success
+                        if user_id in pending_requests:
+                            del pending_requests[user_id]
+                        print(f"Document '{file_name}' created successfully (skipped preview). ID: {doc_id}")
+                        # Return success message and document URL
+                        return {
+                            "message": f"OK, I've created the Google Doc: '{file_name}'. You can view it [here]({doc_url}).",
+                            "action_required": None,
+                            "doc_url": doc_url
+                        }
+                    else:
+                        # Don't clear pending state on failure, maybe they want to retry?
+                        # (Or maybe clear it? For now, keep it.)
+                        print(f"Document creation failed for '{file_name}' (skipped preview).")
+                        return {"message": f"Sorry, I couldn't create the document '{file_name}'. Please try again.", "action_required": None}
+                except Exception as e:
+                    print(f"Error during skip preview creation: {e}")
+                    return {"message": f"An error occurred while creating the document: {e}", "action_required": None}
+            
             elif confirmation_choice is True:
                 try:
                     print(f"User confirmed. Running LangChain creation for: {original_message}")
                     doc_id, doc_url = await run_langchain_doc_creation(
                         original_request=original_message,
                         generated_title=file_name,
-                        access_token=creds
+                        creds=creds
                     )
 
                     if doc_id and doc_url:
