@@ -5,6 +5,8 @@ from auth.auth import verify_google_token
 from services.gemini_service import parse_user_message, generate_doc_preview, generate_gemini_response
 from services.google_service import get_drive_item_content, run_langchain_doc_creation
 from services.analyze_service import analyze_content
+from services.drive_cache import load_index
+import json
 
 router = APIRouter()
 
@@ -20,22 +22,22 @@ class UserQuery(BaseModel):
 
 @router.post("/api/ask")
 async def handle_user_query(query: UserQuery, token_info: tuple[str, dict] = Depends(verify_google_token)):
+    user_id, access_token = token_info # Unpack user_id and access_token
     user_message = query.message
-    user_token, _ = token_info
     confirmation_choice = query.confirmation
     regenerate_request = query.regenerate
 
     # --- Log state ---
-    print(f"User token: {user_token[:10]}...")
-    pending_data = pending_requests.get(user_token)
+    print(f"User token: {user_id[:10]}...")
+    pending_data = pending_requests.get(user_id)
     print(f"Pending data: {pending_data}")
     print(f"Received query: message='{user_message}', confirmation={confirmation_choice}, regenerate={regenerate_request}")
 
     # --- Step 1: Check for and handle pending confirmation --- 
-    if user_token in pending_requests:
-        pending_state = pending_requests[user_token]['state']
-        file_name = pending_requests[user_token]['file_name']
-        original_message = pending_requests[user_token].get('original_message')
+    if user_id in pending_requests:
+        pending_state = pending_requests[user_id]['state']
+        file_name = pending_requests[user_id]['file_name']
+        original_message = pending_requests[user_id].get('original_message')
 
         print(f"⚠️ Handling pending state: {pending_state} for file: {file_name}")
 
@@ -44,10 +46,10 @@ async def handle_user_query(query: UserQuery, token_info: tuple[str, dict] = Dep
             if confirmation_choice is True:
                 try:
                     print(f"Generating preview for '{file_name}' based on: {original_message}")
-                    preview = await generate_doc_preview(original_message)
+                    preview = await generate_doc_preview(original_message, file_name)
                     # Update state to confirm creation, store preview
-                    pending_requests[user_token]['state'] = 'confirm_create'
-                    pending_requests[user_token]['preview'] = preview
+                    pending_requests[user_id]['state'] = 'confirm_create'
+                    pending_requests[user_id]['preview'] = preview
                     print(f"Preview generated. New state: confirm_create")
                     return {
                         "success": True,
@@ -62,28 +64,28 @@ async def handle_user_query(query: UserQuery, token_info: tuple[str, dict] = Dep
                     }
                 except Exception as e:
                     print(f"Error generating preview: {e}")
-                    del pending_requests[user_token] # Clear pending on error
+                    del pending_requests[user_id] # Clear pending on error
                     raise HTTPException(status_code=500, detail=f"Failed to generate preview: {e}")
             elif confirmation_choice is False:
                 print("User cancelled preview generation.")
-                del pending_requests[user_token]
+                del pending_requests[user_id]
                 return {"success": False, "message": "❌ Preview generation canceled."}
             else:
                 # User sent a message instead of confirming - should not happen with buttons?
                 # For now, just remind them.
-                del pending_requests[user_token] # Clear state and re-parse message
+                del pending_requests[user_id] # Clear state and re-parse message
                 print("Confirmation ambiguity. Clearing state and reprocessing message.")
                 # Fall through to re-process the message outside the confirmation block
         
         # --- State: Confirm Document Creation (or Regenerate) ---
         elif pending_state == 'confirm_create':
-            preview = pending_requests[user_token].get('preview', '[Preview not available]')
+            preview = pending_requests[user_id].get('preview', '[Preview not available]')
             
             if regenerate_request is True:
                 try:
                     print(f"Regenerating preview for '{file_name}' based on: {original_message}")
-                    new_preview = await generate_doc_preview(original_message)
-                    pending_requests[user_token]['preview'] = new_preview # Update stored preview
+                    new_preview = await generate_doc_preview(original_message, file_name)
+                    pending_requests[user_id]['preview'] = new_preview # Update stored preview
                     print(f"Preview regenerated.")
                     return {
                         "success": True,
@@ -107,12 +109,12 @@ async def handle_user_query(query: UserQuery, token_info: tuple[str, dict] = Dep
                     doc_id, doc_url = await run_langchain_doc_creation(
                         original_request=original_message,
                         generated_title=file_name,
-                        access_token=user_token
+                        access_token=access_token
                     )
 
                     if doc_id and doc_url:
                         response_message = f"Document '{file_name}' created successfully! You can access it here: {doc_url}"
-                        del pending_requests[user_token] # Clear state on success
+                        del pending_requests[user_id] # Clear state on success
                         return {
                             "success": True,
                             "message": response_message,
@@ -120,17 +122,17 @@ async def handle_user_query(query: UserQuery, token_info: tuple[str, dict] = Dep
                         }
                 except Exception as e:
                     print(f"Error creating doc after confirmation: {e}")
-                    del pending_requests[user_token] # Clear pending on error
+                    del pending_requests[user_id] # Clear pending on error
                     raise HTTPException(status_code=500, detail=f"Failed to create document: {e}")
             
             elif confirmation_choice is False:
                 print("User cancelled document creation.")
-                del pending_requests[user_token]
+                del pending_requests[user_id]
                 return {"success": False, "message": "❌ Document creation canceled."}
             
             else:
                 # User sent a message instead of confirming
-                del pending_requests[user_token] # Clear state and re-parse message
+                del pending_requests[user_id] # Clear state and re-parse message
                 print("Confirmation ambiguity. Clearing state and reprocessing message.")
                 # Fall through to re-process the message outside the confirmation block
 
@@ -145,12 +147,12 @@ async def handle_user_query(query: UserQuery, token_info: tuple[str, dict] = Dep
         file_name = parsed.get("name", "Untitled Document")
         try:
             # Store initial state: confirm preview generation
-            pending_requests[user_token] = {
+            pending_requests[user_id] = {
                 'state': 'confirm_preview_gen',
                 'file_name': file_name,
                 'original_message': user_message # Store original msg for preview gen
             }
-            print(f"📝 Storing initial pending request for {user_token}: state=confirm_preview_gen, file={file_name}")
+            print(f"📝 Storing initial pending request for {user_id}: state=confirm_preview_gen, file={file_name}")
 
             # Ask user to confirm PREVIEW generation
             return {
@@ -161,8 +163,8 @@ async def handle_user_query(query: UserQuery, token_info: tuple[str, dict] = Dep
             }
         except Exception as e:
              print(f"Error initiating createDoc flow: {e}")
-             if user_token in pending_requests:
-                 del pending_requests[user_token]
+             if user_id in pending_requests:
+                 del pending_requests[user_id]
              raise HTTPException(status_code=500, detail=f"Failed to process document creation request: {e}")
 
     # --- Handle Analyze Action ---
@@ -178,7 +180,7 @@ async def handle_user_query(query: UserQuery, token_info: tuple[str, dict] = Dep
             print(f"Attempting to fetch context for target: {target_name}")
             try:
                 # ASSUMPTION: get_drive_item_content exists in google_service
-                context = await get_drive_item_content(target_name, user_token)
+                context = await get_drive_item_content(target_name, user_id)
                 if not context:
                      print(f"Warning: No content found or retrieved for target '{target_name}'. Proceeding without context.")
                 else:
@@ -203,14 +205,37 @@ async def handle_user_query(query: UserQuery, token_info: tuple[str, dict] = Dep
         raise HTTPException(status_code=400, detail=parsed.get("error"))
     else:
         print(f"Unrecognized action parsed: {action}. Falling back to general response.")
-        # Fallback: Use Gemini for a general response instead of specific action
         try:
-            fallback_response = await generate_gemini_response(user_message)
-            return {
-                "success": True, 
-                "message": fallback_response,
-                "type": "fallback_message"
-            }
+            drive_index = load_index(user_id) or []
+            if drive_index:
+                index_prompt_lines = [f"- {item['name']} ({'Folder' if item.get('mimeType') == 'application/vnd.google-apps.folder' else 'File'}, id:{item['id']})" for item in drive_index[:200]]
+                formatted_index = "\n".join(index_prompt_lines)
+                drive_context = f"\nUser's Google Drive Contents (partial list):\n{formatted_index}\n---"
+            else:
+                drive_context = "\nUser's Google Drive Contents: (Could not load or is empty)"
+            
+            print(f"[Debug] Drive context length: {len(drive_context)} chars for fallback")
+            response_content = await generate_gemini_response(
+                user_message, drive_context=drive_context
+            )
+            try:
+                response_data = json.loads(response_content)
+                return {
+                    "success": True,
+                    "message": response_data.get("message", "General fallback response."),
+                    "type": "fallback_message"
+                }
+            except json.JSONDecodeError as json_err: 
+                print(f"Error decoding fallback Gemini JSON response: {json_err}")
+                return {"success": False, "message": "Error processing AI fallback response."}
+            except Exception as e: 
+                print(f"Error generating fallback response: {e}")
+                raise HTTPException(status_code=500, detail="Sorry, I encountered an error trying to respond.")
+        except json.JSONDecodeError:
+            print("Error decoding main Gemini JSON response.") 
+            return {"success": False, "message": "Error processing initial AI response."}
         except Exception as e:
-            print(f"Error generating fallback response: {e}")
-            raise HTTPException(status_code=500, detail="Sorry, I encountered an error trying to respond.")
+            print(f"An error occurred in handle_user_query: {e}")
+            import traceback
+            traceback.print_exc()
+            return {"success": False, "message": f"An internal error occurred: {e}"}

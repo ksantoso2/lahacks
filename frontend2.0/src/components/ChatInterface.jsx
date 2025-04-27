@@ -3,8 +3,8 @@ import axios from 'axios'; // Import axios for API calls
 import ReactMarkdown from 'react-markdown'; // Import ReactMarkdown
 import stylesModule from './ChatInterface.module.css'; // Import CSS Module
 
-// Accept props, specifically backendUrl and authToken
-function ChatInterface({ backendUrl, authToken }) {
+// Accept props, specifically backendUrl
+function ChatInterface({ backendUrl }) {
   const [messages, setMessages] = useState([
     { id: Date.now(), sender: 'agent', text: 'Hello! How can I help you with your Google Drive files today?' },
   ]);
@@ -19,6 +19,19 @@ function ChatInterface({ backendUrl, authToken }) {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Add useEffect to load initial messages or context if needed
+  useEffect(() => {
+    const fetchInitialData = async () => {
+      try {
+        const response = await axios.get(`${backendUrl}/api/initial-context`, { withCredentials: true });
+        // Process initial data
+      } catch (error) {
+        console.error("Error fetching initial data:", error);
+      }
+    };
+    fetchInitialData();
+  }, [backendUrl]);
 
   const handleInputChange = (event) => {
     setInputValue(event.target.value);
@@ -52,9 +65,7 @@ function ChatInterface({ backendUrl, authToken }) {
       }
 
       const response = await axios.post(`${backendUrl}/api/ask`, payload, {
-        headers: {
-          Authorization: `Bearer ${authToken}`, // Include auth token
-        },
+        withCredentials: true, // Send cookies with the request
       });
 
       const agentMessage = { 
@@ -92,7 +103,7 @@ function ChatInterface({ backendUrl, authToken }) {
 
   return (
     <div className={stylesModule.chatContainer}>
-      <div className={stylesModule.messagesContainer}>
+      <div className={stylesModule.chatHistory}>
         {messages.map((msg, index) => (
           <div
             key={index}
