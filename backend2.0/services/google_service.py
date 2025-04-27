@@ -15,9 +15,8 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_google_doc.llms import gemini_llm # Correct variable name
 from langchain_google_doc.prompts import content_generation_template
 
-async def list_all_drive_items(access_token: str) -> list[dict]:
+async def list_all_drive_items(creds: Credentials) -> list[dict]:
     """Return every file & folder’s id, name, mimeType, parents, modifiedTime."""
-    creds = Credentials(token=access_token)
     service = build("drive", "v3", credentials=creds)
     items, page_token = [], None
     while True:
@@ -34,14 +33,10 @@ async def list_all_drive_items(access_token: str) -> list[dict]:
     return items
 from .drive_cache import load_index, save_index
 
-async def ensure_drive_index(user_id: str, access_token: str) -> list[dict]:
+async def ensure_drive_index(user_id: str, creds: Credentials) -> list[dict]:
     """If no cache or >24 h old, (re)build the index.
-    Uses dummy updated_at for now until implemented in drive_cache.
+    Passes Credentials object to list_all_drive_items.
     """
-    # TODO: Implement updated_at in drive_cache.py
-    # For now, assume we always check if index exists and rebuild if not or force rebuild
-    # last_updated = updated_at(user_id) # Get actual update time when implemented
-
     needs_update = False
     current_index = load_index(user_id)
     if not current_index: # Always update if no cache
@@ -51,7 +46,7 @@ async def ensure_drive_index(user_id: str, access_token: str) -> list[dict]:
 
     if needs_update:
         print(f"Updating Drive index cache for user {user_id}...")
-        index = await list_all_drive_items(access_token)
+        index = await list_all_drive_items(creds)
         save_index(user_id, index)
         print(f"Saved updated Drive index for user {user_id}.")
         return index
@@ -59,12 +54,11 @@ async def ensure_drive_index(user_id: str, access_token: str) -> list[dict]:
         print(f"Using existing Drive index cache for user {user_id}.")
         return current_index
 
-async def create_google_doc(title: str, access_token: str, content: str | None = None):
+async def create_google_doc(title: str, creds: Credentials, content: str | None = None):
     """
     Creates a Google Doc with the given title and optional content and optionally inserts content.
     Returns (docId, docUrl).
     """
-    creds = Credentials(token=access_token)
     service = build('docs', 'v1', credentials=creds)
 
     try:
@@ -107,7 +101,7 @@ async def create_google_doc(title: str, access_token: str, content: str | None =
         return None, None
 
 
-async def run_langchain_doc_creation(original_request: str, generated_title: str, access_token: str):
+async def run_langchain_doc_creation(original_request: str, generated_title: str, creds: Credentials):
     """
     Generates Google Doc content using LangChain based on the original request,
     then creates the document with the generated title and content.
@@ -133,10 +127,10 @@ async def run_langchain_doc_creation(original_request: str, generated_title: str
              return None, None # Indicate failure
 
         # 3. Call the modified create_google_doc with title and the generated content
-        print(f"Calling create_google_doc with title='{generated_title}' and LangChain content...")
+        print(f"Creating Google Doc '{generated_title}' using LangChain flow...")
         doc_id, doc_url = await create_google_doc(
             title=generated_title,
-            access_token=access_token,
+            creds=creds,
             content=generated_content # Pass the full content here
         )
 
@@ -150,22 +144,22 @@ async def run_langchain_doc_creation(original_request: str, generated_title: str
         return None, None # Indicate failure
 
 
-async def get_drive_item_content(target_name: str, access_token: str) -> str | None:
+async def get_drive_item_content(target_name: str, creds: Credentials) -> str | None:
     """
     Searches for a file/folder by name in Google Drive and attempts to retrieve its text content.
 
     Args:
         target_name: The name of the file or folder to search for.
-        access_token: The user's Google OAuth access token.
+        creds: The user's Google OAuth credentials.
 
     Returns:
         The text content of the item, a summary (for folders),
         or None if not found or content cannot be extracted.
     """
-    creds = Credentials(token=access_token)
-    try:
-        service = build('drive', 'v3', credentials=creds)
+    print(f"Attempting to get content for '{target_name}'...")
+    service = build('drive', 'v3', credentials=creds)
 
+    try:
         # --- Search for the file/folder by name ---
         # Note: This finds the first match. Might need refinement if names collide.
         print(f"Searching Drive for: '{target_name}'")

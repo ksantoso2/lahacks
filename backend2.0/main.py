@@ -1,12 +1,15 @@
 import os
 import uvicorn
-from fastapi import FastAPI, Depends, Request
+from fastapi import FastAPI, Depends, Request, HTTPException
 from dotenv import load_dotenv
 from fastapi.middleware.cors import CORSMiddleware
+from google.oauth2.credentials import Credentials
 from starlette.middleware.sessions import SessionMiddleware
 from routers import action_router 
 from auth.auth import router as auth_router, verify_google_token
 from services.drive_cache import load_index
+from services.google_service import list_all_drive_items, ensure_drive_index
+import json
 
 load_dotenv()
 
@@ -53,24 +56,24 @@ async def get_user_info(request: Request, token_info: tuple = Depends(verify_goo
 
 # +++ NEW Initial Context Endpoint +++
 @app.get("/api/initial-context")
-async def get_initial_context(token_info: tuple = Depends(verify_google_token)):
-    """
-    Provides initial context to the frontend upon loading,
-    confirming the user is logged in and returning their ID
-    and the cached Google Drive index.
-    """
-    user_id, _ = token_info # Unpack user_id from the dependency result
-    print(f"Providing initial context for user_id: {user_id}")
+async def get_initial_context(token_info: tuple[str, Credentials] = Depends(verify_google_token)):
+    """Endpoint called on frontend load to get user ID and ensure Drive index is ready."""
+    user_id, creds = token_info
+    if not user_id or not creds:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    try:
+        # Ensure the index is up-to-date (or created)
+        drive_index = await ensure_drive_index(user_id, creds)
+        print(f"Loaded drive index cache for initial context. Found {len(drive_index or [])} items.")
 
-    # Load the cached index for the user
-    drive_index = load_index(user_id)
-    print(f"Loaded drive index cache for initial context. Found {len(drive_index or [])} items.")
-
-    return {
-        "user_id": user_id,
-        "drive_index": drive_index or []
-    }
-# +++++++++++++++++++++++++++++++++++++
+        return {
+            "user_id": user_id,
+            "drive_index": drive_index or []
+        }
+    except Exception as e:
+        print(f"--- Error fetching initial context: {e} ---")
+        raise HTTPException(status_code=500, detail="Failed to fetch initial context")
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

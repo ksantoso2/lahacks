@@ -60,7 +60,7 @@ function App() {
 
   // Function to initiate the local login flow
   const handleLocalLogin = () => {
-    window.location.href = `${backendUrl}/local-login`; 
+    window.location.href = `${backendUrl}/auth/local-login`; // Add /auth prefix
   };
 
   // Logout function (optional for local dev - simply clears the token)
