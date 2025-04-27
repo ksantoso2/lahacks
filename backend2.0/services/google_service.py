@@ -180,24 +180,33 @@ async def move_doc_to_folder(doc_name: str, source_folder: str, target_folder: s
         doc_id = doc['id']
         current_parents = ",".join(doc.get('parents', []))
 
-        # Search for the target folder
-        # --- List all folders ---
-        folder_results = service.files().list(
-            q="mimeType = 'application/vnd.google-apps.folder'",
-            fields="files(id, name)",
-            pageSize=1000,
-            corpora="user",
-            supportsAllDrives=True,
-            includeItemsFromAllDrives=True
-        ).execute()
-        #print(f"Raw API folder response: {folder_results}")
+        # --- List all folders with pagination ---
+        all_folders = []
+        page_token = None
 
-        # --- Log all found folders ---
-        print(f"Found folders: {[f['name'] for f in folder_results['files']]}")
+        while True:
+            response = service.files().list(
+                q="mimeType = 'application/vnd.google-apps.folder'",
+                fields="nextPageToken, files(id, name)",
+                pageSize=1000,
+                corpora="allDrives",
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True,
+                pageToken=page_token
+            ).execute()
+
+            all_folders.extend(response.get('files', []))
+            page_token = response.get('nextPageToken', None)
+
+            if not page_token:
+                break  # No more pages
+
+        # --- Log folders for debugging ---
+        print(f"Found folders: {[f['name'] for f in all_folders]}")
 
         # --- Search manually (case-insensitive) ---
         target_folder_match = next(
-            (f for f in folder_results['files'] if f['name'].lower() == target_folder.lower()),
+            (f for f in all_folders if f['name'].lower() == target_folder.lower()),
             None
         )
 
@@ -206,6 +215,7 @@ async def move_doc_to_folder(doc_name: str, source_folder: str, target_folder: s
 
         target_folder_id = target_folder_match['id']
         print(f"Matched target folder ID: {target_folder_id}")
+
 
 
         # Perform the move
