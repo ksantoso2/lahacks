@@ -263,9 +263,9 @@ async def handle_user_query(query: UserQuery, token_info: tuple[str, Credentials
             current_history = chat_histories.get(user_id, []) # Get current history
 
             if drive_index:
-                index_prompt_lines = [f"- {item['name']} ({'Folder' if item.get('mimeType') == 'application/vnd.google-apps.folder' else 'File'}, id:{item['id']})" for item in drive_index[:200]]
+                index_prompt_lines = [f"- {item['name']} ({'Folder' if item.get('mimeType') == 'application/vnd.google-apps.folder' else 'File'}, id:{item['id']})" for item in drive_index]
                 formatted_index = "\n".join(index_prompt_lines)
-                drive_context = f"\nUser's Google Drive Contents (partial list):\n{formatted_index}\n---"
+                drive_context = f"\nUser's Google Drive Contents:\n{formatted_index}\n---"
             else:
                 drive_context = "\nUser's Google Drive Contents: (Could not load or is empty)"
             
