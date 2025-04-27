@@ -40,143 +40,214 @@ async def handle_user_query(query: UserQuery, token_info: tuple[str, Credentials
     print(f"Pending data: {pending_data}")
     print(f"Received query: message='{user_message}', confirmation={confirmation_choice}, regenerate={regenerate_request}, skip_preview={skip_request}")
 
-    # --- Step 1: Check for and handle pending confirmation --- 
     if user_id in pending_requests:
-        pending_state = pending_requests[user_id]['state']
-        file_name = pending_requests[user_id]['file_name']
-        original_message = pending_requests[user_id].get('original_message')
+        pending = pending_requests[user_id]
+        pending_state = pending['state']
 
-        print(f"⚠️ Handling pending state: {pending_state} for file: {file_name}")
+        # --- Handle moveDoc pending state ---
+        if pending_state == 'moveDoc':
+            doc_name = pending['doc_name']
 
-        # --- State: Confirm Preview Generation --- 
-        if pending_state == 'confirm_preview_gen':
-            if confirmation_choice is True:
-                try:
-                    print(f"Generating preview for '{file_name}'")
-                    preview = await generate_doc_preview(file_name) # Pass only file_name
-                    # Update state to confirm creation, store preview
-                    pending_requests[user_id]['state'] = 'confirm_create'
-                    pending_requests[user_id]['preview'] = preview
-                    print(f"Preview generated. New state: confirm_create")
-                    return {
-                        "success": True,
-                        "message": (
-                            f"📝 Okay, here's a preview for **'{file_name}'**:\n\n"
-                            f"> {preview}\n\n"
-                            f"Would you like me to create this document?"
-                        ),
-                        "needsConfirmation": True,
-                        "confirmationType": "doc_create", # Signal frontend type
-                        "allowRegenerate": True      # Signal frontend can show regenerate
-                    }
-                except Exception as e:
-                    print(f"Error generating preview: {e}")
-                    del pending_requests[user_id] # Clear pending on error
-                    raise HTTPException(status_code=500, detail=f"Failed to generate preview: {e}")
-            elif confirmation_choice is False:
-                print("User cancelled preview generation.")
-                del pending_requests[user_id]
-                return {"success": False, "message": "❌ Preview generation canceled."}
-            else:
-                # User sent a message instead of confirming - should not happen with buttons?
-                # For now, just remind them.
-                del pending_requests[user_id] # Clear state and re-parse message
-                print("Confirmation ambiguity. Clearing state and reprocessing message.")
-                # Fall through to re-process the message outside the confirmation block
-        
-        # --- State: Confirm Document Creation (or Regenerate) ---
-        elif pending_state == 'confirm_create':
-            preview = pending_requests[user_id].get('preview', '[Preview not available]')
-            
-            if regenerate_request is True:
-                try:
-                    print(f"Regenerating preview for '{file_name}'")
-                    new_preview = await generate_doc_preview(file_name) # Pass only file_name
-                    pending_requests[user_id]['preview'] = new_preview # Update stored preview
-                    print(f"Preview regenerated.")
-                    return {
-                        "success": True,
-                        "message": (
-                            f"📝 Okay, here's a new preview for **'{file_name}'**:\n\n"
-                            f"> {new_preview}\n\n"
-                            f"Would you like me to create this document now?"
-                        ),
-                        "needsConfirmation": True,
-                        "confirmationType": "doc_create",
-                        "allowRegenerate": True
-                    }
-                except Exception as e:
-                    print(f"Error regenerating preview: {e}")
-                    # Don't delete pending state here, let user try again or cancel
-                    raise HTTPException(status_code=500, detail=f"Failed to regenerate preview: {e}")
-            
-            elif skip_request is True:
-                print(f"User skipped preview. Running LangChain creation for: {original_message}")
-                try:
-                    doc_id, doc_url = await run_langchain_doc_creation(
-                        original_request=original_message,
-                        generated_title=file_name,
+            # Step 1: Collect source_folder
+            if not pending.get('source_folder'):
+                pending['source_folder'] = user_message  # Capture source folder
+                return {"message": f"Where would you like to move '{doc_name}' to?"}
+
+            # Step 2: Collect target_folder
+            elif not pending.get('target_folder'):
+                pending['target_folder'] = user_message  # Capture target folder
+                return {
+                    "message": (
+                        f"⚠️ Confirm: Move '{doc_name}' from '{pending['source_folder']}' "
+                        f"to '{pending['target_folder']}'? (yes/no)"
+                    ),
+                    "needsConfirmation": True,
+                    "confirmationType": "moveDoc"
+                }
+
+            # Step 3: Handle confirmation
+            elif pending.get('confirmation_needed', True):
+                if user_message.lower() in ["yes", "y"]:
+                    from services.google_service import move_doc_to_folder
+                    result_message = await move_doc_to_folder(
+                        doc_name=pending['doc_name'],
+                        source_folder=pending['source_folder'],
+                        target_folder=pending['target_folder'],
                         creds=creds
                     )
+                    del pending_requests[user_id]
+                    return {"message": result_message}
+                elif user_message.lower() in ["no", "n"]:
+                    del pending_requests[user_id]
+                    return {"message": "❌ Move operation canceled."}
+                else:
+                    return {"message": "Please respond with 'yes' or 'no'."}
 
-                    if doc_id and doc_url:
-                        # Clear pending state on success
-                        if user_id in pending_requests:
-                            del pending_requests[user_id]
-                        print(f"Document '{file_name}' created successfully (skipped preview). ID: {doc_id}")
-                        # Return success message and document URL
-                        return {
-                            "message": f"OK, I've created the Google Doc: '{file_name}'. You can view it [here]({doc_url}).",
-                            "action_required": None,
-                            "doc_url": doc_url
-                        }
-                    else:
-                        # Don't clear pending state on failure, maybe they want to retry?
-                        # (Or maybe clear it? For now, keep it.)
-                        print(f"Document creation failed for '{file_name}' (skipped preview).")
-                        return {"message": f"Sorry, I couldn't create the document '{file_name}'. Please try again.", "action_required": None}
-                except Exception as e:
-                    print(f"Error during skip preview creation: {e}")
-                    return {"message": f"An error occurred while creating the document: {e}", "action_required": None}
-            
-            elif confirmation_choice is True:
-                try:
-                    print(f"User confirmed. Running LangChain creation for: {original_message}")
-                    doc_id, doc_url = await run_langchain_doc_creation(
-                        original_request=original_message,
-                        generated_title=file_name,
-                        creds=creds
-                    )
+        # --- Handle confirm_preview_gen / confirm_create pending states ---
+        elif pending_state in ['confirm_preview_gen', 'confirm_create']:
+            file_name = pending['file_name']
+            original_message = pending.get('original_message')
 
-                    if doc_id and doc_url:
-                        response_message = f"Document '{file_name}' created successfully! You can access it here: {doc_url}"
-                        del pending_requests[user_id] # Clear state on success
+            # --- State: Confirm Preview Generation --- 
+            if pending_state == 'confirm_preview_gen':
+                if confirmation_choice is True:
+                    try:
+                        print(f"Generating preview for '{file_name}'")
+                        preview = await generate_doc_preview(file_name) # Pass only file_name
+                        # Update state to confirm creation, store preview
+                        pending_requests[user_id]['state'] = 'confirm_create'
+                        pending_requests[user_id]['preview'] = preview
+                        print(f"Preview generated. New state: confirm_create")
                         return {
                             "success": True,
-                            "message": response_message,
-                            "docUrl": doc_url
+                            "message": (
+                                f"📝 Okay, here's a preview for **'{file_name}'**:\n\n"
+                                f"> {preview}\n\n"
+                                f"Would you like me to create this document?"
+                            ),
+                            "needsConfirmation": True,
+                            "confirmationType": "doc_create", # Signal frontend type
+                            "allowRegenerate": True      # Signal frontend can show regenerate
                         }
-                except Exception as e:
-                    print(f"Error creating doc after confirmation: {e}")
-                    del pending_requests[user_id] # Clear pending on error
-                    raise HTTPException(status_code=500, detail=f"Failed to create document: {e}")
+                    except Exception as e:
+                        print(f"Error generating preview: {e}")
+                        del pending_requests[user_id] # Clear pending on error
+                        raise HTTPException(status_code=500, detail=f"Failed to generate preview: {e}")
+                elif confirmation_choice is False:
+                    print("User cancelled preview generation.")
+                    del pending_requests[user_id]
+                    return {"success": False, "message": "❌ Preview generation canceled."}
+                else:
+                    # User sent a message instead of confirming - should not happen with buttons?
+                    # For now, just remind them.
+                    del pending_requests[user_id] # Clear state and re-parse message
+                    print("Confirmation ambiguity. Clearing state and reprocessing message.")
+                    # Fall through to re-process the message outside the confirmation block
             
-            elif confirmation_choice is False:
-                print("User cancelled document creation.")
-                del pending_requests[user_id]
-                return {"success": False, "message": "❌ Document creation canceled."}
-            
-            else:
-                # User sent a message instead of confirming
-                del pending_requests[user_id] # Clear state and re-parse message
-                print("Confirmation ambiguity. Clearing state and reprocessing message.")
-                # Fall through to re-process the message outside the confirmation block
+            # --- State: Confirm Document Creation (or Regenerate) ---
+            elif pending_state == 'confirm_create':
+                preview = pending_requests[user_id].get('preview', '[Preview not available]')
+                
+                if regenerate_request is True:
+                    try:
+                        print(f"Regenerating preview for '{file_name}'")
+                        new_preview = await generate_doc_preview(file_name) # Pass only file_name
+                        pending_requests[user_id]['preview'] = new_preview # Update stored preview
+                        print(f"Preview regenerated.")
+                        return {
+                            "success": True,
+                            "message": (
+                                f"📝 Okay, here's a new preview for **'{file_name}'**:\n\n"
+                                f"> {new_preview}\n\n"
+                                f"Would you like me to create this document now?"
+                            ),
+                            "needsConfirmation": True,
+                            "confirmationType": "doc_create",
+                            "allowRegenerate": True
+                        }
+                    except Exception as e:
+                        print(f"Error regenerating preview: {e}")
+                        # Don't delete pending state here, let user try again or cancel
+                        raise HTTPException(status_code=500, detail=f"Failed to regenerate preview: {e}")
+                
+                elif skip_request is True:
+                    print(f"User skipped preview. Running LangChain creation for: {original_message}")
+                    try:
+                        doc_id, doc_url = await run_langchain_doc_creation(
+                            original_request=original_message,
+                            generated_title=file_name,
+                            creds=creds
+                        )
+
+                        if doc_id and doc_url:
+                            # Clear pending state on success
+                            if user_id in pending_requests:
+                                del pending_requests[user_id]
+                            print(f"Document '{file_name}' created successfully (skipped preview). ID: {doc_id}")
+                            # Return success message and document URL
+                            return {
+                                "message": f"OK, I've created the Google Doc: '{file_name}'. You can view it [here]({doc_url}).",
+                                "action_required": None,
+                                "doc_url": doc_url
+                            }
+                        else:
+                            # Don't clear pending state on failure, maybe they want to retry?
+                            # (Or maybe clear it? For now, keep it.)
+                            print(f"Document creation failed for '{file_name}' (skipped preview).")
+                            return {"message": f"Sorry, I couldn't create the document '{file_name}'. Please try again.", "action_required": None}
+                    except Exception as e:
+                        print(f"Error during skip preview creation: {e}")
+                        return {"message": f"An error occurred while creating the document: {e}", "action_required": None}
+                
+                elif confirmation_choice is True:
+                    try:
+                        print(f"User confirmed. Running LangChain creation for: {original_message}")
+                        doc_id, doc_url = await run_langchain_doc_creation(
+                            original_request=original_message,
+                            generated_title=file_name,
+                            creds=creds
+                        )
+
+                        if doc_id and doc_url:
+                            response_message = f"Document '{file_name}' created successfully! You can access it here: {doc_url}"
+                            del pending_requests[user_id] # Clear state on success
+                            return {
+                                "success": True,
+                                "message": response_message,
+                                "docUrl": doc_url
+                            }
+                    except Exception as e:
+                        print(f"Error creating doc after confirmation: {e}")
+                        del pending_requests[user_id] # Clear pending on error
+                        raise HTTPException(status_code=500, detail=f"Failed to create document: {e}")
+                
+                elif confirmation_choice is False:
+                    print("User cancelled document creation.")
+                    del pending_requests[user_id]
+                    return {"success": False, "message": "❌ Document creation canceled."}
+                
+                else:
+                    # User sent a message instead of confirming
+                    del pending_requests[user_id] # Clear state and re-parse message
+                    print("Confirmation ambiguity. Clearing state and reprocessing message.")
+                    # Fall through to re-process the message outside the confirmation block
+
 
     # --- Step 2: No pending request - Parse user message with Gemini --- 
     # (This part runs only if no pending request was handled above)
     print("No pending request found or handled, parsing new message.")
     parsed = await parse_user_message(user_message)
     action = parsed.get("action_to_perform")
+
+    # --- Handle Move Document Action ---
+    if action == "moveDoc":
+        doc_name = parsed.get("doc_name")
+        source_folder = parsed.get("source_folder")
+        target_folder = parsed.get("target_folder")
+
+        pending_requests[user_id] = {
+            'state': 'moveDoc',
+            'doc_name': doc_name,
+            'source_folder': source_folder,
+            'target_folder': target_folder,
+            'confirmation_needed': True
+        }
+
+        # Prompt for missing info
+        if not source_folder:
+            return {"message": f"Please provide the origin folder for '{doc_name}'."}
+        if not target_folder:
+            return {"message": f"Where would you like to move '{doc_name}' to?"}
+
+        # If both folders are provided, ask for confirmation
+        return {
+            "message": (
+                f"⚠️ Confirm: Move '{doc_name}' from '{source_folder}' to '{target_folder}'? (yes/no)"
+            ),
+            "needsConfirmation": True,
+            "confirmationType": "moveDoc"
+        }
+
     
     # --- Handle Create Document Action (Initial request) ---
     if action == "createDoc":
