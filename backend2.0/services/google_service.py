@@ -61,7 +61,7 @@ async def ensure_drive_index(user_id: str, access_token: str) -> list[dict]:
 
 async def create_google_doc(title: str, access_token: str, content: str | None = None):
     """
-    Creates a Google Doc with the given title and optionally inserts content.
+    Creates a Google Doc with the given title and optional content and optionally inserts content.
     Returns (docId, docUrl).
     """
     creds = Credentials(token=access_token)

@@ -87,16 +87,23 @@ async def generate_gemini_response(prompt: str, drive_context: str | None = None
         else:
             print(f"[Debug] No Drive context provided for Gemini generation.")
 
-        # Custom prompt specific to this function
+        # Enhance prompt for document creation
+        full_prompt = f"Generate detailed content for a Google Doc based on this request: {prompt}"
         model = genai.GenerativeModel(
             GEMINI_MODEL_NAME,
             system_instruction="You are a helpful Google Drive assistant. Use the provided context about the user's Drive files if available."
+            system_instruction="You are a document content generator."
         )
         response = await model.generate_content_async(full_prompt) # Use the combined prompt
         return response.text
+        response = await model.generate_content_async(full_prompt)
+        return response.text.strip()
     except Exception as e:
         print(f"Error generating Gemini response: {e}")
         return "⚠️ Gemini failed to generate a response."
+
+        print(f"Error during Gemini content generation: {e}")
+        return "⚠️ Failed to generate document content."
 
 # Example usage (for testing):
 # if __name__ == "__main__":
