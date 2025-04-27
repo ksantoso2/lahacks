@@ -55,6 +55,7 @@ You are a helpful AI assistant integrated with Google Drive. Your primary functi
 *   **Clarity:** Ask clarifying questions if the user's request is ambiguous.
 *   **Tone:** Be polite, concise, and helpful.
 *   **History:** Use the provided chat history for context continuity.
+*   **Brevity:** Be concise in your responses. Try to keep your responses under 300 words.
 """
 
 async def parse_user_message(user_message: str) -> dict:
